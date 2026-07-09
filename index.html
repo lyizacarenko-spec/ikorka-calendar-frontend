@@ -1,0 +1,1623 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Платіжний календар — IkorkaShop</title>
+<link rel="manifest" href="manifest.json">
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+:root {
+  --bg: #0d1117; --surface: #161b22; --surface2: #1c2128; --surface3: #21262d;
+  --border: #30363d; --border2: #21262d;
+  --text: #e6edf3; --muted: #7d8590; --dim: #484f58;
+  --blue: #388bfd; --blue-bg: #0d1f3c; --blue-border: #1f3a6e;
+  --green: #3fb950; --green-bg: #0d2d1b; --green-border: #1a4731;
+  --amber: #d29922; --amber-bg: #2d1f00; --amber-border: #5a3d00;
+  --red: #f85149; --red-bg: #2d0e0e; --red-border: #6e1a1a;
+  --purple: #a371f7; --purple-bg: #1a0d3c;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+html,body { height:100%; }
+body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); overflow:hidden; }
+
+/* PIN SCREEN */
+#pin-screen {
+  position:fixed; inset:0; background:var(--bg);
+  display:flex; align-items:center; justify-content:center;
+  z-index:1000; flex-direction:column; gap:32px;
+}
+.pin-logo { text-align:center; }
+.pin-logo-icon { font-size:48px; margin-bottom:12px; }
+.pin-logo-title { font-size:22px; font-weight:700; color:var(--text); }
+.pin-logo-sub { font-size:13px; color:var(--muted); margin-top:4px; }
+.pin-display {
+  display:flex; gap:12px; justify-content:center;
+}
+.pin-dot {
+  width:16px; height:16px; border-radius:50%;
+  border:2px solid var(--border); background:transparent;
+  transition:all 0.2s;
+}
+.pin-dot.filled { background:var(--blue); border-color:var(--blue); }
+.pin-keypad { display:grid; grid-template-columns:repeat(3,72px); gap:10px; }
+.pin-key {
+  height:56px; border-radius:12px; border:1px solid var(--border);
+  background:var(--surface); color:var(--text); font-size:20px; font-weight:600;
+  cursor:pointer; transition:all 0.15s; font-family:'Inter',sans-serif;
+}
+.pin-key:hover { background:var(--surface2); border-color:var(--blue); }
+.pin-key:active { transform:scale(0.95); }
+.pin-key.del { font-size:16px; color:var(--muted); }
+.pin-error { color:var(--red); font-size:13px; text-align:center; min-height:20px; }
+
+/* APP LAYOUT */
+#app { display:none; height:100vh; grid-template-columns:220px 1fr; grid-template-rows:1fr; }
+#app.visible { display:grid; }
+
+/* SIDEBAR */
+.sidebar {
+  background:var(--surface); border-right:1px solid var(--border);
+  display:flex; flex-direction:column; overflow:hidden;
+}
+.sidebar-logo {
+  padding:18px 16px 14px; border-bottom:1px solid var(--border);
+}
+.sidebar-logo-title { font-size:13px; font-weight:700; letter-spacing:0.3px; }
+.sidebar-logo-sub { font-size:11px; color:var(--muted); margin-top:2px; }
+.sidebar-rate {
+  padding:8px 16px; background:var(--blue-bg); border-bottom:1px solid var(--border);
+  display:flex; gap:12px; font-size:11px; color:var(--muted);
+}
+.rate-item strong { color:var(--text); font-family:'JetBrains Mono',monospace; }
+.sidebar-nav { flex:1; overflow-y:auto; padding:6px 0; }
+.nav-group { padding:12px 16px 4px; font-size:10px; font-weight:700; color:var(--dim); text-transform:uppercase; letter-spacing:1px; }
+.nav-item {
+  display:flex; align-items:center; gap:9px; padding:7px 16px;
+  font-size:13px; color:var(--muted); cursor:pointer;
+  border-left:2px solid transparent; transition:all 0.12s;
+}
+.nav-item:hover { background:var(--surface2); color:var(--text); }
+.nav-item.active { background:var(--surface2); color:var(--text); border-left-color:var(--blue); }
+.nav-item .icon { font-size:15px; width:18px; text-align:center; flex-shrink:0; }
+.nav-badge { margin-left:auto; background:var(--red); color:#fff; font-size:10px; font-weight:700; padding:1px 6px; border-radius:10px; }
+.sidebar-user {
+  padding:12px 16px; border-top:1px solid var(--border);
+  display:flex; align-items:center; gap:10px;
+}
+.user-avatar {
+  width:28px; height:28px; border-radius:50%;
+  background:linear-gradient(135deg,var(--blue),var(--green));
+  display:flex; align-items:center; justify-content:center;
+  font-size:11px; font-weight:700; color:#fff; flex-shrink:0;
+}
+.user-name { font-size:12px; font-weight:600; }
+.user-role { font-size:10px; color:var(--muted); }
+.logout-btn { margin-left:auto; background:none; border:none; color:var(--dim); cursor:pointer; font-size:16px; }
+.logout-btn:hover { color:var(--red); }
+
+/* MAIN */
+.main { display:flex; flex-direction:column; overflow:hidden; background:var(--bg); }
+
+/* TOPBAR */
+.topbar {
+  background:var(--surface); border-bottom:1px solid var(--border);
+  padding:10px 20px; display:flex; align-items:center; gap:12px; flex-shrink:0;
+}
+.topbar-title { font-size:14px; font-weight:600; flex:1; }
+.period-ctrl { display:flex; align-items:center; gap:6px; }
+.period-btn { background:var(--surface2); border:1px solid var(--border); color:var(--text); width:28px; height:28px; border-radius:6px; cursor:pointer; font-size:12px; }
+.period-btn:hover { border-color:var(--blue); }
+.period-label { font-size:13px; font-weight:600; min-width:90px; text-align:center; }
+.topbar-actions { display:flex; gap:8px; }
+.btn { padding:7px 14px; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; border:none; transition:all 0.15s; font-family:'Inter',sans-serif; }
+.btn-ghost { background:transparent; color:var(--muted); border:1px solid var(--border); }
+.btn-ghost:hover { color:var(--text); border-color:var(--muted); }
+.btn-primary { background:var(--blue); color:#fff; }
+.btn-primary:hover { background:#4d9fff; }
+.btn-green { background:var(--green); color:#fff; }
+.btn-red { background:var(--red); color:#fff; }
+.btn-sm { padding:5px 10px; font-size:11px; }
+
+/* SCREENS */
+.screen { display:none; flex:1; flex-direction:column; overflow:hidden; }
+.screen.active { display:flex; }
+.screen-body { flex:1; overflow-y:auto; padding:16px 20px; }
+
+/* BALANCE STRIP */
+.balance-strip {
+  background:var(--surface2); border-bottom:1px solid var(--border);
+  padding:10px 20px; display:flex; gap:10px; overflow-x:auto; flex-shrink:0;
+}
+.balance-strip::-webkit-scrollbar { display:none; }
+.bal-card {
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:8px; padding:8px 14px; min-width:140px; flex-shrink:0;
+}
+.bal-card.danger { border-color:var(--red); background:var(--red-bg); }
+.bal-card.total { border-color:var(--blue-border); background:var(--blue-bg); }
+.bal-label { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:3px; }
+.bal-amount { font-family:'JetBrains Mono',monospace; font-size:15px; font-weight:600; }
+.bal-amount.pos { color:var(--green); }
+.bal-amount.neg { color:var(--red); }
+.bal-amount.blue { color:var(--blue); }
+.bal-sub { font-size:10px; color:var(--muted); margin-top:2px; }
+
+/* CALENDAR GRID */
+.cal-container { display:flex; flex:1; overflow:hidden; }
+.cal-wrap { flex:1; overflow:auto; }
+.cal-legend {
+  display:flex; gap:12px; padding:8px 20px; border-bottom:1px solid var(--border);
+  background:var(--surface2); flex-shrink:0;
+}
+.leg-item { display:flex; align-items:center; gap:6px; font-size:11px; color:var(--muted); }
+.leg-dot { width:10px; height:10px; border-radius:2px; }
+.leg-dot.plan { background:#d29922; }
+.leg-dot.paid { background:#3fb950; }
+.leg-dot.confirmed { background:#2ea043; border:1px solid #1a4020; }
+.leg-dot.noecon { background:#a371f7; }
+
+.cal-table { border-collapse:collapse; font-size:12px; }
+.cal-table th { background:var(--surface); border:1px solid var(--border); padding:6px 6px; position:sticky; top:0; z-index:10; white-space:nowrap; }
+.col-art { width:190px; min-width:170px; text-align:left; }
+.col-note { width:80px; min-width:80px; text-align:left; }
+.col-sum { width:80px; text-align:right; }
+.col-day { width:46px; text-align:center; }
+.day-num { font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:600; }
+.day-name { font-size:9px; color:var(--muted); text-transform:uppercase; }
+.today .day-num { color:var(--blue); }
+.weekend .day-num { color:var(--dim); }
+
+.cat-row td { background:var(--surface2); color:var(--muted); font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:1px; padding:5px 10px; border:1px solid var(--border); }
+.data-row td { border:1px solid var(--border2); }
+.data-row:hover td { background:rgba(56,139,253,.04); }
+.art-cell { padding:6px 10px; }
+.art-name { font-size:12px; color:var(--text); }
+.art-badge { display:inline-block; font-size:9px; padding:1px 5px; border-radius:3px; margin-left:4px; font-weight:600; }
+.art-badge.fc { background:var(--blue-bg); color:var(--blue); }
+.art-badge.vc { background:var(--amber-bg); color:var(--amber); }
+.art-badge.noecon { background:var(--purple-bg); color:var(--purple); }
+.art-note { font-size:10px; color:var(--dim); margin-top:1px; max-width:170px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.sum-cell { padding:6px 8px; text-align:right; font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--muted); }
+
+.cell { position:relative; height:32px; cursor:pointer; }
+.cell:hover { background:rgba(56,139,253,.1)!important; }
+.cell-inner {
+  position:absolute; inset:2px; border-radius:3px;
+  display:flex; align-items:center; justify-content:center;
+  font-family:'JetBrains Mono',monospace; font-size:10px; font-weight:600;
+}
+.s-plan .cell-inner { background:var(--amber-bg); color:#f0c040; border:1px solid var(--amber-border); }
+.s-paid .cell-inner { background:var(--green-bg); color:#3fb950; border:1px solid var(--green-border); }
+.s-confirmed .cell-inner { background:#0d2d0d; color:#2ea043; border:1px solid #1a4020; }
+.s-empty .cell-inner { opacity:0; }
+
+.total-row td { background:var(--surface2); border:1px solid var(--border); padding:6px 8px; font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:700; }
+.total-lbl { font-size:11px; font-weight:700; }
+.total-neg { text-align:right; color:var(--red); }
+.total-day { text-align:center; font-size:10px; color:var(--red); }
+
+/* SIDE PANEL */
+.side-panel { width:260px; border-left:1px solid var(--border); background:var(--surface); overflow-y:auto; flex-shrink:0; }
+.panel-sec { border-bottom:1px solid var(--border); padding:12px 14px; }
+.panel-title { font-size:10px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:10px; }
+.gap-alert { background:var(--red-bg); border:1px solid var(--red-border); border-radius:6px; padding:8px 10px; display:flex; gap:8px; }
+.gap-text { font-size:11px; color:#ff7b72; }
+.gap-text strong { display:block; margin-bottom:2px; font-size:12px; }
+.cf-mini-row { display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid var(--border2); font-size:12px; }
+.cf-mini-row:last-child { border:none; }
+.cf-mini-lbl { color:var(--muted); }
+.cf-mini-val { font-family:'JetBrains Mono',monospace; font-weight:600; }
+.cf-mini-val.pos { color:var(--green); }
+.cf-mini-val.neg { color:var(--red); }
+.cf-mini-total { display:flex; justify-content:space-between; padding-top:8px; margin-top:4px; border-top:1px solid var(--border); }
+.cf-mini-total-lbl { font-size:12px; font-weight:700; }
+.cf-mini-total-val { font-family:'JetBrains Mono',monospace; font-size:15px; font-weight:700; color:var(--green); }
+.up-item { display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--border2); }
+.up-item:last-child { border:none; }
+.up-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+.up-dot.over { background:var(--red); }
+.up-dot.plan { background:var(--amber); }
+.up-info { flex:1; }
+.up-name { font-size:12px; }
+.up-date { font-size:10px; color:var(--muted); }
+.up-sum { font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:600; color:var(--red); }
+
+/* CASHFLOW SCREEN */
+.stats-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:20px; }
+.stat-card { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:14px; }
+.stat-lbl { font-size:11px; color:var(--muted); margin-bottom:6px; }
+.stat-val { font-family:'JetBrains Mono',monospace; font-size:18px; font-weight:700; }
+.stat-val.pos { color:var(--green); }
+.stat-val.neg { color:var(--red); }
+.stat-val.blue { color:var(--blue); }
+.big-card { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:16px; margin-bottom:14px; }
+.big-card-title { font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:12px; }
+.cf-row { display:flex; justify-content:space-between; align-items:center; padding:7px 0; border-bottom:1px solid var(--border2); }
+.cf-row:last-child { border:none; }
+.cf-lbl { font-size:13px; color:var(--text); }
+.cf-val { font-family:'JetBrains Mono',monospace; font-size:13px; font-weight:600; }
+.cf-val.pos { color:var(--green); }
+.cf-val.neg { color:var(--red); }
+.cf-total-row { display:flex; justify-content:space-between; align-items:center; padding-top:12px; margin-top:6px; border-top:1px solid var(--border); }
+.cf-total-lbl { font-size:14px; font-weight:700; }
+.cf-total-val { font-family:'JetBrains Mono',monospace; font-size:20px; font-weight:700; color:var(--green); }
+
+/* ACCOUNTS SCREEN */
+.accounts-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:14px; }
+.account-card { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:16px; }
+.account-card.danger { border-color:var(--red); }
+.account-card.archived { opacity:0.5; }
+.account-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px; }
+.account-name { font-size:14px; font-weight:600; }
+.account-bank { font-size:11px; color:var(--muted); margin-top:2px; }
+.account-badge { font-size:10px; padding:2px 8px; border-radius:10px; font-weight:600; }
+.badge-api { background:var(--green-bg); color:var(--green); border:1px solid var(--green-border); }
+.badge-manual { background:var(--amber-bg); color:var(--amber); border:1px solid var(--amber-border); }
+.badge-danger { background:var(--red-bg); color:var(--red); border:1px solid var(--red-border); }
+.account-balance { font-family:'JetBrains Mono',monospace; font-size:22px; font-weight:700; margin:8px 0; }
+.account-balance.pos { color:var(--green); }
+.account-balance.neg { color:var(--red); }
+.account-stats { display:grid; grid-template-columns:1fr 1fr; gap:8px; padding-top:10px; border-top:1px solid var(--border); }
+.acc-stat-lbl { font-size:10px; color:var(--muted); }
+.acc-stat-val { font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:600; margin-top:2px; }
+.account-actions { display:flex; gap:6px; margin-top:12px; }
+
+/* DEBTS SCREEN */
+.debt-card { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:14px; margin-bottom:10px; }
+.debt-card.returned { border-color:var(--green-border); opacity:0.65; }
+.debt-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+.debt-who { font-size:14px; font-weight:600; }
+.debt-status-badge { font-size:11px; padding:3px 10px; border-radius:20px; font-weight:600; }
+.debt-status-badge.active { background:var(--red-bg); color:var(--red); border:1px solid var(--red-border); }
+.debt-status-badge.returned { background:var(--green-bg); color:var(--green); border:1px solid var(--green-border); }
+.debt-row { display:flex; justify-content:space-between; padding:3px 0; font-size:12px; color:var(--muted); }
+.debt-val { font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:600; color:var(--text); }
+.debt-actions { display:flex; gap:8px; margin-top:10px; }
+
+/* CASH COUNT */
+.cash-count-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:16px; }
+.denomination-card { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:12px; }
+.denom-label { font-size:12px; color:var(--muted); margin-bottom:8px; }
+.denom-input { width:100%; background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:8px; color:var(--text); font-size:16px; font-family:'JetBrains Mono',monospace; font-weight:600; text-align:center; outline:none; }
+.denom-input:focus { border-color:var(--blue); }
+.denom-total { font-size:11px; color:var(--muted); margin-top:6px; text-align:center; font-family:'JetBrains Mono',monospace; }
+.cash-total-card { background:var(--blue-bg); border:1px solid var(--blue-border); border-radius:10px; padding:16px; text-align:center; margin-bottom:16px; }
+.cash-total-lbl { font-size:12px; color:var(--muted); margin-bottom:8px; }
+.cash-total-val { font-family:'JetBrains Mono',monospace; font-size:28px; font-weight:700; color:var(--blue); }
+
+/* CURRENCY */
+.currency-card { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:16px; margin-bottom:12px; }
+.op-row { display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--border2); font-size:13px; }
+.op-row:last-child { border:none; }
+.op-type { font-size:11px; padding:2px 8px; border-radius:10px; font-weight:600; }
+.op-buy { background:var(--green-bg); color:var(--green); }
+.op-sell { background:var(--amber-bg); color:var(--amber); }
+.pnl-pos { color:var(--green); font-weight:600; font-family:'JetBrains Mono',monospace; font-size:12px; }
+.pnl-neg { color:var(--red); font-weight:600; font-family:'JetBrains Mono',monospace; font-size:12px; }
+
+/* WEEKLY SUMMARY */
+.summary-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+.summary-card { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:16px; }
+.summary-card-title { font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:12px; }
+
+/* MODAL */
+.modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.75); z-index:500; align-items:center; justify-content:center; }
+.modal-overlay.show { display:flex; }
+.modal { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:22px; width:440px; max-width:95vw; max-height:90vh; overflow-y:auto; }
+.modal-title { font-size:15px; font-weight:700; margin-bottom:4px; }
+.modal-sub { font-size:12px; color:var(--muted); margin-bottom:18px; }
+.form-group { margin-bottom:12px; }
+.form-label { font-size:11px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:5px; display:block; }
+.form-input { width:100%; background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:9px 12px; color:var(--text); font-size:13px; font-family:'Inter',sans-serif; outline:none; }
+.form-input:focus { border-color:var(--blue); }
+select.form-input { appearance:none; }
+.form-row { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.type-toggle { display:flex; gap:8px; margin-bottom:12px; }
+.type-btn { flex:1; padding:9px; border-radius:8px; border:1px solid var(--border); font-size:13px; font-weight:600; cursor:pointer; text-align:center; font-family:'Inter',sans-serif; background:var(--bg); color:var(--muted); }
+.type-btn.active-expense { background:var(--red-bg); color:var(--red); border-color:var(--red-border); }
+.type-btn.active-income { background:var(--green-bg); color:var(--green); border-color:var(--green-border); }
+.status-pills { display:flex; gap:8px; }
+.pill { padding:6px 14px; border-radius:20px; font-size:12px; font-weight:600; cursor:pointer; border:1px solid transparent; font-family:'Inter',sans-serif; }
+.pill.plan { background:var(--amber-bg); color:var(--amber); border-color:var(--amber-border); }
+.pill.paid { background:var(--surface2); color:var(--muted); border-color:var(--border); }
+.pill.active { opacity:1; } .pill:not(.active) { opacity:0.5; }
+.modal-actions { display:flex; gap:10px; margin-top:16px; }
+.modal-actions .btn { flex:1; padding:10px; font-size:13px; }
+.btn-cancel { background:var(--surface2); color:var(--muted); border:1px solid var(--border); }
+
+/* TOAST */
+.toast { position:fixed; bottom:24px; right:24px; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:12px 16px; font-size:13px; z-index:1000; display:flex; align-items:center; gap:10px; box-shadow:0 4px 20px rgba(0,0,0,.4); transform:translateY(100px); opacity:0; transition:all 0.3s; }
+.toast.show { transform:translateY(0); opacity:1; }
+.toast.success { border-color:var(--green-border); }
+.toast.error { border-color:var(--red-border); }
+
+/* LOADER */
+.loader { display:flex; align-items:center; justify-content:center; padding:40px; color:var(--muted); font-size:13px; gap:10px; }
+.spinner { width:16px; height:16px; border:2px solid var(--border); border-top-color:var(--blue); border-radius:50%; animation:spin 0.8s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+
+/* EMPTY STATE */
+.empty-state { text-align:center; padding:60px 20px; }
+.empty-icon { font-size:40px; margin-bottom:12px; }
+.empty-title { font-size:15px; font-weight:600; margin-bottom:6px; }
+.empty-sub { font-size:13px; color:var(--muted); }
+
+/* SECTION HEADER */
+.section-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:16px; }
+.section-title { font-size:18px; font-weight:700; }
+.section-sub { font-size:12px; color:var(--muted); margin-top:3px; }
+</style>
+</head>
+<body>
+
+<!-- PIN SCREEN -->
+<div id="pin-screen">
+  <div class="pin-logo">
+    <div class="pin-logo-icon">💰</div>
+    <div class="pin-logo-title">Платіжний календар</div>
+    <div class="pin-logo-sub">IkorkaShop · Введіть PIN</div>
+  </div>
+  <div class="pin-display" id="pinDisplay">
+    <div class="pin-dot" id="d0"></div>
+    <div class="pin-dot" id="d1"></div>
+    <div class="pin-dot" id="d2"></div>
+    <div class="pin-dot" id="d3"></div>
+  </div>
+  <div class="pin-keypad">
+    <button class="pin-key" onclick="pinKey('1')">1</button>
+    <button class="pin-key" onclick="pinKey('2')">2</button>
+    <button class="pin-key" onclick="pinKey('3')">3</button>
+    <button class="pin-key" onclick="pinKey('4')">4</button>
+    <button class="pin-key" onclick="pinKey('5')">5</button>
+    <button class="pin-key" onclick="pinKey('6')">6</button>
+    <button class="pin-key" onclick="pinKey('7')">7</button>
+    <button class="pin-key" onclick="pinKey('8')">8</button>
+    <button class="pin-key" onclick="pinKey('9')">9</button>
+    <button class="pin-key" onclick="pinKey('')"></button>
+    <button class="pin-key" onclick="pinKey('0')">0</button>
+    <button class="pin-key del" onclick="pinDel()">⌫</button>
+  </div>
+  <div class="pin-error" id="pinError"></div>
+</div>
+
+<!-- APP -->
+<div id="app">
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-title">💰 IKORKA FINANCE</div>
+      <div class="sidebar-logo-sub">Платіжний календар</div>
+    </div>
+    <div class="sidebar-rate" id="rateBar">
+      <span>USD: <strong id="usdRate">—</strong></span>
+      <span>EUR: <strong id="eurRate">—</strong></span>
+    </div>
+    <div class="sidebar-nav">
+      <div class="nav-group">Головне</div>
+      <div class="nav-item active" data-screen="calendar"><span class="icon">📅</span> Календар</div>
+      <div class="nav-item" data-screen="cashflow"><span class="icon">📊</span> Кеш-флоу</div>
+      <div class="nav-item" data-screen="accounts"><span class="icon">💳</span> Рахунки / ФОП</div>
+      <div class="nav-item" data-screen="transfers"><span class="icon">🔄</span> Переводи</div>
+      <div class="nav-group">Облік</div>
+      <div class="nav-item" data-screen="withdrawals"><span class="icon">👑</span> Вивід власника</div>
+      <div class="nav-item" data-screen="debts"><span class="icon">🤝</span> Борги <span class="nav-badge" id="debtsBadge" style="display:none">0</span></div>
+      <div class="nav-item" data-screen="cashcount"><span class="icon">💵</span> Купюрниця</div>
+      <div class="nav-item" data-screen="currency"><span class="icon">💱</span> Валютний резерв</div>
+      <div class="nav-item" data-screen="summary"><span class="icon">📋</span> Тижнева зведка</div>
+      <div class="nav-group">Система</div>
+      <div class="nav-item" data-screen="autopay"><span class="icon">🔁</span> Автоплатежі</div>
+      <div class="nav-item" data-screen="users"><span class="icon">👥</span> Користувачі</div>
+    </div>
+    <div class="sidebar-user">
+      <div class="user-avatar" id="userAvatar">?</div>
+      <div>
+        <div class="user-name" id="userName">—</div>
+        <div class="user-role" id="userRole">—</div>
+      </div>
+      <button class="logout-btn" onclick="logout()" title="Вийти">↩</button>
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div class="main">
+    <!-- TOPBAR -->
+    <div class="topbar">
+      <div class="topbar-title" id="topbarTitle">Платіжний календар</div>
+      <div class="period-ctrl" id="periodCtrl">
+        <button class="period-btn" onclick="changePeriod(-1)">◀</button>
+        <span class="period-label" id="periodLabel">—</span>
+        <button class="period-btn" onclick="changePeriod(1)">▶</button>
+      </div>
+      <div class="topbar-actions">
+        <button class="btn btn-ghost" onclick="exportData()">📤 Вигрузити</button>
+        <button class="btn btn-primary" id="addBtn" onclick="openAddModal()">+ Додати</button>
+      </div>
+    </div>
+
+    <!-- CALENDAR SCREEN -->
+    <div class="screen active" id="screen-calendar">
+      <div class="balance-strip" id="balanceStrip">
+        <div class="loader"><div class="spinner"></div> Завантаження...</div>
+      </div>
+      <div class="cal-legend">
+        <div class="leg-item"><div class="leg-dot plan"></div> Заплановано</div>
+        <div class="leg-item"><div class="leg-dot paid"></div> Оплачено</div>
+        <div class="leg-item"><div class="leg-dot confirmed"></div> В економіку</div>
+        <div class="leg-item"><div class="leg-dot noecon"></div> Тільки кеш-флоу</div>
+        <span style="margin-left:auto;font-size:11px;color:var(--dim)">Кліки на ячейку → додати платіж</span>
+      </div>
+      <div class="cal-container">
+        <div class="cal-wrap" id="calWrap">
+          <div class="loader"><div class="spinner"></div> Завантаження календаря...</div>
+        </div>
+        <div class="side-panel" id="sidePanel">
+          <div class="panel-sec" id="gapAlert" style="display:none"></div>
+          <div class="panel-sec">
+            <div class="panel-title">Кеш-флоу · міс.</div>
+            <div id="cfMini"><div class="loader"><div class="spinner"></div></div></div>
+          </div>
+          <div class="panel-sec">
+            <div class="panel-title">Найближчі платежі</div>
+            <div id="upcomingList"><div class="loader"><div class="spinner"></div></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CASHFLOW SCREEN -->
+    <div class="screen" id="screen-cashflow">
+      <div class="screen-body">
+        <div class="section-header">
+          <div>
+            <div class="section-title">Кеш-флоу</div>
+            <div class="section-sub" id="cfPeriodLabel">Липень 2026</div>
+          </div>
+        </div>
+        <div class="stats-grid" id="cfStats">
+          <div class="loader"><div class="spinner"></div></div>
+        </div>
+        <div id="cfDetails"></div>
+      </div>
+    </div>
+
+    <!-- ACCOUNTS SCREEN -->
+    <div class="screen" id="screen-accounts">
+      <div class="screen-body">
+        <div class="section-header">
+          <div>
+            <div class="section-title">Рахунки та ФОП</div>
+            <div class="section-sub">Балансы оновлюються автоматично</div>
+          </div>
+          <button class="btn btn-primary" onclick="openAddAccountModal()">+ Додати рахунок</button>
+        </div>
+        <div class="accounts-grid" id="accountsGrid">
+          <div class="loader"><div class="spinner"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TRANSFERS SCREEN -->
+    <div class="screen" id="screen-transfers">
+      <div class="screen-body">
+        <div class="section-header">
+          <div>
+            <div class="section-title">Переводи між рахунками</div>
+            <div class="section-sub">Внутрішні переміщення — не впливають на P&L</div>
+          </div>
+          <button class="btn btn-primary" onclick="openTransferModal()">+ Перевід</button>
+        </div>
+        <div id="transfersList"><div class="loader"><div class="spinner"></div></div></div>
+      </div>
+    </div>
+
+    <!-- WITHDRAWALS SCREEN -->
+    <div class="screen" id="screen-withdrawals">
+      <div class="screen-body">
+        <div class="section-header">
+          <div>
+            <div class="section-title">Вивід власника</div>
+            <div class="section-sub">Мінусується з кеш-флоу · не йде в економіку</div>
+          </div>
+          <button class="btn btn-primary" id="addWithdrawalBtn" onclick="openWithdrawalModal()">+ Вивід</button>
+        </div>
+        <div id="withdrawalsList"><div class="loader"><div class="spinner"></div></div></div>
+      </div>
+    </div>
+
+    <!-- DEBTS SCREEN -->
+    <div class="screen" id="screen-debts">
+      <div class="screen-body">
+        <div class="section-header">
+          <div>
+            <div class="section-title">Борги</div>
+            <div class="section-sub" id="debtsSubtitle">Завантаження...</div>
+          </div>
+          <button class="btn btn-primary" onclick="openDebtModal()">+ Видати борг</button>
+        </div>
+        <div id="debtsList"><div class="loader"><div class="spinner"></div></div></div>
+      </div>
+    </div>
+
+    <!-- CASH COUNT SCREEN -->
+    <div class="screen" id="screen-cashcount">
+      <div class="screen-body">
+        <div class="section-header">
+          <div>
+            <div class="section-title">Купюрниця</div>
+            <div class="section-sub">Перерахунок готівки по номіналах</div>
+          </div>
+        </div>
+        <div class="cash-total-card">
+          <div class="cash-total-lbl">Загальна сума готівки</div>
+          <div class="cash-total-val" id="cashTotal">₴ 0</div>
+        </div>
+        <div class="cash-count-grid">
+          <div class="denomination-card">
+            <div class="denom-label">₴ 1000</div>
+            <input class="denom-input" type="number" id="d1000" value="0" min="0" oninput="calcCash()">
+            <div class="denom-total" id="t1000">= ₴ 0</div>
+          </div>
+          <div class="denomination-card">
+            <div class="denom-label">₴ 500</div>
+            <input class="denom-input" type="number" id="d500" value="0" min="0" oninput="calcCash()">
+            <div class="denom-total" id="t500">= ₴ 0</div>
+          </div>
+          <div class="denomination-card">
+            <div class="denom-label">₴ 200</div>
+            <input class="denom-input" type="number" id="d200" value="0" min="0" oninput="calcCash()">
+            <div class="denom-total" id="t200">= ₴ 0</div>
+          </div>
+          <div class="denomination-card">
+            <div class="denom-label">₴ 100</div>
+            <input class="denom-input" type="number" id="d100" value="0" min="0" oninput="calcCash()">
+            <div class="denom-total" id="t100">= ₴ 0</div>
+          </div>
+          <div class="denomination-card">
+            <div class="denom-label">₴ 50</div>
+            <input class="denom-input" type="number" id="d50" value="0" min="0" oninput="calcCash()">
+            <div class="denom-total" id="t50">= ₴ 0</div>
+          </div>
+          <div class="denomination-card">
+            <div class="denom-label">₴ 20</div>
+            <input class="denom-input" type="number" id="d20" value="0" min="0" oninput="calcCash()">
+            <div class="denom-total" id="t20">= ₴ 0</div>
+          </div>
+        </div>
+        <button class="btn btn-primary" style="width:100%;padding:12px;font-size:14px" onclick="saveCashCount()">💾 Зберегти перерахунок</button>
+        <div style="margin-top:20px">
+          <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">Історія перерахунків</div>
+          <div id="cashHistory"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CURRENCY SCREEN -->
+    <div class="screen" id="screen-currency">
+      <div class="screen-body">
+        <div class="section-header">
+          <div>
+            <div class="section-title">Валютний резерв</div>
+            <div class="section-sub">Облік покупки та продажу валюти</div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-green" onclick="openCurrencyModal('buy')">+ Купити USD</button>
+            <button class="btn btn-ghost" onclick="openCurrencyModal('sell')">Продати USD</button>
+          </div>
+        </div>
+        <div class="big-card" id="currencySummary">
+          <div class="loader"><div class="spinner"></div></div>
+        </div>
+        <div id="currencyList"></div>
+      </div>
+    </div>
+
+    <!-- SUMMARY SCREEN -->
+    <div class="screen" id="screen-summary">
+      <div class="screen-body">
+        <div class="section-header">
+          <div>
+            <div class="section-title">Тижнева зведка</div>
+            <div class="section-sub" id="summaryPeriod">Завантаження...</div>
+          </div>
+          <button class="btn btn-ghost" onclick="loadSummary(true)">🔄 Оновити</button>
+        </div>
+        <div id="summaryContent"><div class="loader"><div class="spinner"></div></div></div>
+      </div>
+    </div>
+
+    <!-- AUTOPAY SCREEN -->
+    <div class="screen" id="screen-autopay">
+      <div class="screen-body">
+        <div class="section-header">
+          <div>
+            <div class="section-title">Автоплатежі</div>
+            <div class="section-sub">Шаблони повторюваних платежів</div>
+          </div>
+          <button class="btn btn-primary" onclick="openAutopayModal()">+ Шаблон</button>
+        </div>
+        <div id="autopayList"><div class="loader"><div class="spinner"></div></div></div>
+      </div>
+    </div>
+
+    <!-- USERS SCREEN -->
+    <div class="screen" id="screen-users">
+      <div class="screen-body">
+        <div class="section-header">
+          <div><div class="section-title">Користувачі</div><div class="section-sub">PIN-доступ · 4 користувачі</div></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="big-card"><div style="display:flex;align-items:center;gap:12px;margin-bottom:12px"><div style="width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,var(--blue),var(--green));display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px">Ж</div><div><div style="font-size:14px;font-weight:600">Женя</div><div style="font-size:11px;color:var(--muted)">Повний доступ · Адміністратор</div></div></div><div style="font-size:12px;color:var(--muted)">PIN: 1111 · Може все включаючи фінальний статус</div></div>
+          <div class="big-card"><div style="display:flex;align-items:center;gap:12px;margin-bottom:12px"><div style="width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,var(--amber),var(--red));display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px">А</div><div><div style="font-size:14px;font-weight:600">Аня</div><div style="font-size:11px;color:var(--muted)">Редактор · Бухгалтер</div></div></div><div style="font-size:12px;color:var(--muted)">PIN: 2222 · Перегляд + введення + статус Оплачено</div></div>
+          <div class="big-card"><div style="display:flex;align-items:center;gap:12px;margin-bottom:12px"><div style="width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,var(--purple),var(--blue));display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px">К</div><div><div style="font-size:14px;font-weight:600">Катя</div><div style="font-size:11px;color:var(--muted)">Тільки перегляд</div></div></div><div style="font-size:12px;color:var(--muted)">PIN: 3333 · Тільки перегляд усіх даних</div></div>
+          <div class="big-card"><div style="display:flex;align-items:center;gap:12px;margin-bottom:12px"><div style="width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,var(--muted),var(--dim));display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px">Е</div><div><div style="font-size:14px;font-weight:600">Егор</div><div style="font-size:11px;color:var(--muted)">Тільки перегляд</div></div></div><div style="font-size:12px;color:var(--muted)">PIN: 4444 · Тільки перегляд усіх даних</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ADD TRANSACTION MODAL -->
+<div class="modal-overlay" id="addModal">
+  <div class="modal">
+    <div class="modal-title">Додати платіж</div>
+    <div class="modal-sub" id="addModalSub">Платіжний календар</div>
+    <div class="type-toggle">
+      <button class="type-btn active-expense" id="typeExpense" onclick="setTxType('expense')">📤 Витрата</button>
+      <button class="type-btn" id="typeIncome" onclick="setTxType('income')">📥 Прихід</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Стаття витрат</label>
+      <select class="form-input" id="txCategory">
+        <option value="">Оберіть статтю...</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Сума (₴)</label>
+        <input class="form-input" type="number" id="txAmount" placeholder="0">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Дата</label>
+        <input class="form-input" type="date" id="txDate">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Рахунок / ФОП</label>
+      <select class="form-input" id="txAccount">
+        <option value="">Оберіть рахунок...</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Статус</label>
+      <div class="status-pills">
+        <div class="pill plan active" onclick="setStatus('planned')">⏳ Заплановано</div>
+        <div class="pill paid" onclick="setStatus('paid')">✓ Оплачено</div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Коментар</label>
+      <input class="form-input" type="text" id="txNote" placeholder="Необов'язково...">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-cancel" onclick="closeModal('addModal')">Скасувати</button>
+      <button class="btn btn-primary" onclick="saveTransaction()">Зберегти</button>
+    </div>
+  </div>
+</div>
+
+<!-- DEBT MODAL -->
+<div class="modal-overlay" id="debtModal">
+  <div class="modal">
+    <div class="modal-title">Видати борг</div>
+    <div class="form-group">
+      <label class="form-label">Хто бере</label>
+      <input class="form-input" type="text" id="debtPerson" placeholder="Ім'я...">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Сума (₴)</label>
+        <input class="form-input" type="number" id="debtAmount" placeholder="0">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Дата</label>
+        <input class="form-input" type="date" id="debtDate">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">З якого рахунку</label>
+      <select class="form-input" id="debtAccount"></select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Коментар</label>
+      <input class="form-input" type="text" id="debtNote" placeholder="Необов'язково...">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-cancel" onclick="closeModal('debtModal')">Скасувати</button>
+      <button class="btn btn-primary" onclick="saveDebt()">Зберегти</button>
+    </div>
+  </div>
+</div>
+
+<!-- WITHDRAWAL MODAL -->
+<div class="modal-overlay" id="withdrawalModal">
+  <div class="modal">
+    <div class="modal-title">Вивід власника</div>
+    <div class="form-group">
+      <label class="form-label">Власник</label>
+      <select class="form-input" id="wOwner">
+        <option value="Варакута">Варакута</option>
+        <option value="Пальчун">Пальчун</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Сума (₴)</label>
+        <input class="form-input" type="number" id="wAmount" placeholder="0">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Дата</label>
+        <input class="form-input" type="date" id="wDate">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">З якого ФОП</label>
+      <select class="form-input" id="wAccount"></select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Коментар</label>
+      <input class="form-input" type="text" id="wNote" placeholder="Необов'язково...">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-cancel" onclick="closeModal('withdrawalModal')">Скасувати</button>
+      <button class="btn btn-primary" onclick="saveWithdrawal()">Зберегти</button>
+    </div>
+  </div>
+</div>
+
+<!-- CURRENCY MODAL -->
+<div class="modal-overlay" id="currencyModal">
+  <div class="modal">
+    <div class="modal-title" id="currencyModalTitle">Купити USD</div>
+    <div class="form-group">
+      <label class="form-label">Сума в гривнях (₴)</label>
+      <input class="form-input" type="number" id="cAmount" placeholder="0">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Дата</label>
+      <input class="form-input" type="date" id="cDate">
+    </div>
+    <div class="form-group">
+      <label class="form-label">З якого рахунку</label>
+      <select class="form-input" id="cAccount"></select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Коментар</label>
+      <input class="form-input" type="text" id="cNote" placeholder="Необов'язково...">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-cancel" onclick="closeModal('currencyModal')">Скасувати</button>
+      <button class="btn btn-primary" onclick="saveCurrencyOp()">Зберегти</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<script>
+const API = 'https://ikorka-calendar-production.up.railway.app';
+let token = localStorage.getItem('ikorka_token');
+let currentUser = null;
+let currentMonth = new Date().getMonth() + 1;
+let currentYear = new Date().getFullYear();
+let txType = 'expense';
+let txStatus = 'planned';
+let currencyOpType = 'buy';
+let accounts = [];
+let categories = [];
+let selectedCell = null;
+
+// ============ PIN ============
+let pinVal = '';
+function pinKey(k) {
+  if (!k) return;
+  if (pinVal.length >= 4) return;
+  pinVal += k;
+  updatePinDots();
+  if (pinVal.length === 4) attemptLogin();
+}
+function pinDel() {
+  pinVal = pinVal.slice(0, -1);
+  updatePinDots();
+}
+function updatePinDots() {
+  for (let i = 0; i < 4; i++) {
+    document.getElementById('d' + i).classList.toggle('filled', i < pinVal.length);
+  }
+}
+async function attemptLogin() {
+  try {
+    const r = await fetch(API + '/api/auth/login', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ pin: pinVal })
+    });
+    const data = await r.json();
+    if (data.token) {
+      token = data.token;
+      localStorage.setItem('ikorka_token', token);
+      currentUser = data.user;
+      initApp();
+    } else {
+      document.getElementById('pinError').textContent = 'Невірний PIN. Спробуй ще раз.';
+      pinVal = '';
+      updatePinDots();
+      setTimeout(() => document.getElementById('pinError').textContent = '', 2000);
+    }
+  } catch(e) {
+    document.getElementById('pinError').textContent = 'Помилка з\'єднання';
+    pinVal = '';
+    updatePinDots();
+  }
+}
+
+// ============ INIT ============
+async function initApp() {
+  document.getElementById('pin-screen').style.display = 'none';
+  document.getElementById('app').classList.add('visible');
+  document.getElementById('userAvatar').textContent = currentUser.name[0];
+  document.getElementById('userName').textContent = currentUser.name;
+  const roles = { admin: 'Повний доступ', editor: 'Редактор', viewer: 'Тільки перегляд' };
+  document.getElementById('userRole').textContent = roles[currentUser.role] || currentUser.role;
+  
+  // Hide add button for viewers
+  if (currentUser.role === 'viewer') document.getElementById('addBtn').style.display = 'none';
+
+  // Nav clicks
+  document.querySelectorAll('.nav-item[data-screen]').forEach(el => {
+    el.addEventListener('click', () => showScreen(el.dataset.screen, el));
+  });
+
+  updatePeriodLabel();
+  await loadMeta();
+  await loadNBURate();
+  await loadCalendar();
+  await loadBalances();
+  await loadCashflow();
+  await loadDebts();
+}
+
+async function loadMeta() {
+  try {
+    const [accR, catR] = await Promise.all([
+      fetch(API + '/api/accounts', { headers: { Authorization: 'Bearer ' + token } }),
+      fetch(API + '/api/categories', { headers: { Authorization: 'Bearer ' + token } })
+    ]);
+    accounts = (await accR.json()).accounts || [];
+    categories = (await catR.json()).flat || [];
+    
+    // Populate selects
+    const selects = ['txAccount', 'debtAccount', 'wAccount', 'cAccount'];
+    selects.forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.innerHTML = '<option value="">Оберіть рахунок...</option>';
+      accounts.forEach(a => {
+        el.innerHTML += `<option value="${a.id}">${a.name}</option>`;
+      });
+    });
+    
+    const catSel = document.getElementById('txCategory');
+    catSel.innerHTML = '<option value="">Оберіть статтю...</option>';
+    let currentGroup = '';
+    categories.forEach(c => {
+      if (c.group_name !== currentGroup) {
+        currentGroup = c.group_name;
+        catSel.innerHTML += `<optgroup label="${currentGroup}">`;
+      }
+      catSel.innerHTML += `<option value="${c.id}">${c.name}${c.cost_type ? ' ['+c.cost_type+']' : ''}</option>`;
+    });
+  } catch(e) { console.error('loadMeta', e); }
+}
+
+async function loadNBURate() {
+  try {
+    const r = await fetch(API + '/api/currency/rate', { headers: { Authorization: 'Bearer ' + token } });
+    const data = await r.json();
+    document.getElementById('usdRate').textContent = parseFloat(data.usd_rate).toFixed(2);
+    document.getElementById('eurRate').textContent = parseFloat(data.eur_rate).toFixed(2);
+  } catch(e) {}
+}
+
+async function loadBalances() {
+  try {
+    const r = await fetch(API + '/api/accounts', { headers: { Authorization: 'Bearer ' + token } });
+    const data = await r.json();
+    accounts = data.accounts || [];
+    const strip = document.getElementById('balanceStrip');
+    strip.innerHTML = '';
+    let hasGap = false;
+    accounts.forEach(a => {
+      const bal = parseFloat(a.current_balance || 0);
+      const isGap = bal < 0;
+      if (isGap) hasGap = true;
+      strip.innerHTML += `
+        <div class="bal-card ${isGap ? 'danger' : ''}">
+          <div class="bal-label">${a.name}</div>
+          <div class="bal-amount ${isGap ? 'neg' : 'pos'}">₴ ${fmt(Math.abs(bal))}${isGap ? ' ⚠' : ''}</div>
+          <div class="bal-sub">${a.bank || (a.type === 'cash' ? 'Готівка' : '—')}</div>
+        </div>`;
+    });
+    const total = data.total || 0;
+    strip.innerHTML += `
+      <div class="bal-card total">
+        <div class="bal-label">Разом компанія</div>
+        <div class="bal-amount blue">₴ ${fmt(total)}</div>
+        <div class="bal-sub">Всі рахунки</div>
+      </div>`;
+    
+    if (hasGap) {
+      document.getElementById('gapAlert').style.display = 'block';
+      document.getElementById('gapAlert').innerHTML = `
+        <div class="gap-alert"><span style="font-size:16px">⚠️</span>
+        <div class="gap-text"><strong>Касовий розрив!</strong>На одному або більше рахунках від'ємний баланс.</div></div>`;
+    }
+  } catch(e) { console.error('loadBalances', e); }
+}
+
+async function loadCalendar() {
+  const wrap = document.getElementById('calWrap');
+  wrap.innerHTML = '<div class="loader"><div class="spinner"></div> Завантаження...</div>';
+  try {
+    const r = await fetch(`${API}/api/transactions/calendar?month=${currentMonth}&year=${currentYear}`, {
+      headers: { Authorization: 'Bearer ' + token }
+    });
+    const data = await r.json();
+    renderCalendar(data);
+  } catch(e) {
+    wrap.innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-title">Помилка завантаження</div></div>';
+  }
+}
+
+function renderCalendar(data) {
+  const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
+  const today = new Date();
+  let html = '<table class="cal-table"><thead><tr>';
+  html += `<th class="col-art">Стаття</th><th class="col-note">Тип</th><th class="col-sum">Сума міс.</th>`;
+  
+  for (let d = 1; d <= daysInMonth; d++) {
+    const date = new Date(currentYear, currentMonth - 1, d);
+    const dow = date.getDay();
+    const isToday = date.toDateString() === today.toDateString();
+    const isWeekend = dow === 0 || dow === 6;
+    const dayNames = ['нд','пн','вт','ср','чт','пт','сб'];
+    html += `<th class="col-day"><div class="${isToday ? 'today' : isWeekend ? 'weekend' : ''}">
+      <div class="day-num">${d}</div><div class="day-name">${dayNames[dow]}</div></div></th>`;
+  }
+  html += '</tr></thead><tbody>';
+
+  // Group by category group
+  const grouped = {};
+  data.forEach(item => {
+    const g = item.category?.group || 'Інше';
+    if (!grouped[g]) grouped[g] = [];
+    grouped[g].push(item);
+  });
+
+  Object.entries(grouped).forEach(([group, items]) => {
+    html += `<tr class="cat-row"><td colspan="${daysInMonth + 3}">${group}</td></tr>`;
+    items.forEach(item => {
+      const cat = item.category || {};
+      const isNoecon = !cat.is_economy;
+      let monthTotal = 0;
+      Object.values(item.days || {}).forEach(ops => ops.forEach(o => monthTotal += parseFloat(o.amount)));
+      
+      html += `<tr class="data-row">
+        <td class="art-cell">
+          <div class="art-name">${cat.name || '—'}
+            ${cat.cost_type ? `<span class="art-badge ${cat.cost_type.toLowerCase()}">${cat.cost_type}</span>` : ''}
+            ${isNoecon ? '<span class="art-badge noecon">КФ</span>' : ''}
+          </div>
+        </td>
+        <td class="art-cell" style="font-size:10px;color:var(--muted)">${cat.cost_type || '—'}</td>
+        <td class="sum-cell">${monthTotal > 0 ? fmt(monthTotal) : '—'}</td>`;
+      
+      for (let d = 1; d <= daysInMonth; d++) {
+        const dayOps = item.days?.[d] || [];
+        if (dayOps.length === 0) {
+          html += `<td class="cell s-empty" onclick="openCellModal(${cat.id || 0}, '${cat.name || ''}', ${d})"><div class="cell-inner"></div></td>`;
+        } else {
+          const op = dayOps[0];
+          const cls = op.status === 'confirmed' ? 's-confirmed' : op.status === 'paid' ? 's-paid' : 's-plan';
+          const totalDay = dayOps.reduce((s, o) => s + parseFloat(o.amount), 0);
+          html += `<td class="cell ${cls}" onclick="openCellModal(${cat.id || 0}, '${cat.name || ''}', ${d})">
+            <div class="cell-inner">${fmtShort(totalDay)}</div></td>`;
+        }
+      }
+      html += '</tr>';
+    });
+  });
+
+  // Empty state
+  if (data.length === 0) {
+    html += `<tr><td colspan="${daysInMonth + 3}" style="padding:40px;text-align:center;color:var(--muted)">
+      Немає операцій за цей місяць. Натисни "+ Додати" щоб почати.</td></tr>`;
+  }
+
+  html += '</tbody></table>';
+  document.getElementById('calWrap').innerHTML = html;
+}
+
+async function loadCashflow() {
+  try {
+    const r = await fetch(`${API}/api/cashflow?month=${currentMonth}&year=${currentYear}`, {
+      headers: { Authorization: 'Bearer ' + token }
+    });
+    const data = await r.json();
+    
+    // Mini cashflow in sidebar
+    const cfMini = document.getElementById('cfMini');
+    cfMini.innerHTML = `
+      <div class="cf-mini-row"><span class="cf-mini-lbl">Залишок на поч.</span><span class="cf-mini-val">${fmtH(data.opening_balance?.total)}</span></div>
+      <div class="cf-mini-row"><span class="cf-mini-lbl">+ Прихід</span><span class="cf-mini-val pos">+${fmtH(data.income?.total)}</span></div>
+      <div class="cf-mini-row"><span class="cf-mini-lbl">− Витрати FC</span><span class="cf-mini-val neg">−${fmtH(data.expenses?.fc)}</span></div>
+      <div class="cf-mini-row"><span class="cf-mini-lbl">− Витрати VC</span><span class="cf-mini-val neg">−${fmtH(data.expenses?.vc)}</span></div>
+      <div class="cf-mini-row"><span class="cf-mini-lbl">− Вивід власн.</span><span class="cf-mini-val neg">−${fmtH(data.owner_withdrawals?.total)}</span></div>
+      <div class="cf-mini-total">
+        <span class="cf-mini-total-lbl">Прогноз</span>
+        <span class="cf-mini-total-val ${data.closing_balance < 0 ? 'neg' : ''}">₴ ${fmt(data.closing_balance || 0)}</span>
+      </div>`;
+
+    // Full cashflow screen
+    const monthName = new Date(currentYear, currentMonth - 1).toLocaleString('uk', { month: 'long', year: 'numeric' });
+    document.getElementById('cfPeriodLabel').textContent = monthName;
+    
+    document.getElementById('cfStats').innerHTML = `
+      <div class="stat-card"><div class="stat-lbl">Залишок на початок</div><div class="stat-val blue">₴ ${fmt(data.opening_balance?.total || 0)}</div></div>
+      <div class="stat-card"><div class="stat-lbl">Прихід (план)</div><div class="stat-val pos">+₴ ${fmt(data.income?.total || 0)}</div></div>
+      <div class="stat-card"><div class="stat-lbl">Витрати (план)</div><div class="stat-val neg">−₴ ${fmt(data.expenses?.total || 0)}</div></div>
+      <div class="stat-card"><div class="stat-lbl">Прогноз на кінець</div><div class="stat-val ${(data.closing_balance || 0) < 0 ? 'neg' : 'pos'}">₴ ${fmt(data.closing_balance || 0)}</div></div>`;
+
+    document.getElementById('cfDetails').innerHTML = `
+      <div class="big-card">
+        <div class="big-card-title">Приходи по рахунках</div>
+        ${(data.income?.by_account || []).map(a => `
+          <div class="cf-row"><span class="cf-lbl">${a.account_name || 'Невідомо'}</span><span class="cf-val pos">+₴ ${fmt(a.total)}</span></div>`).join('') || '<div style="color:var(--muted);font-size:13px">Немає приходів</div>'}
+      </div>
+      <div class="big-card">
+        <div class="big-card-title">Витрати FC / VC</div>
+        <div class="cf-row"><span class="cf-lbl">Fix Costs (постійні)</span><span class="cf-val neg">−₴ ${fmt(data.expenses?.fc || 0)}</span></div>
+        <div class="cf-row"><span class="cf-lbl">Variable Costs (змінні)</span><span class="cf-val neg">−₴ ${fmt(data.expenses?.vc || 0)}</span></div>
+        <div class="cf-row"><span class="cf-lbl" style="color:var(--purple)">Тільки кеш-флоу (заводи)</span><span class="cf-val" style="color:var(--purple)">−₴ ${fmt(data.expenses?.non_economy || 0)}</span></div>
+        <div class="cf-total-row"><span class="cf-total-lbl">Всього витрати</span><span class="cf-total-val" style="color:var(--red)">−₴ ${fmt(data.expenses?.total || 0)}</span></div>
+      </div>
+      <div class="big-card">
+        <div class="big-card-title">Вивід власників (окремо)</div>
+        ${(data.owner_withdrawals?.by_owner || []).map(o => `
+          <div class="cf-row"><span class="cf-lbl">${o.owner}</span><span class="cf-val neg">−₴ ${fmt(o.total)}</span></div>`).join('') || '<div style="color:var(--muted);font-size:13px">Немає виводів</div>'}
+        <div class="cf-total-row"><span class="cf-total-lbl">Всього вивід</span><span class="cf-total-val" style="color:var(--red)">−₴ ${fmt(data.owner_withdrawals?.total || 0)}</span></div>
+      </div>`;
+  } catch(e) { console.error('loadCashflow', e); }
+}
+
+async function loadDebts() {
+  try {
+    const r = await fetch(`${API}/api/debts`, { headers: { Authorization: 'Bearer ' + token } });
+    const data = await r.json();
+    const active = data.filter(d => d.status === 'active');
+    
+    if (active.length > 0) {
+      document.getElementById('debtsBadge').textContent = active.length;
+      document.getElementById('debtsBadge').style.display = 'block';
+    }
+    document.getElementById('debtsSubtitle').textContent = `${active.length} активних · ${data.length - active.length} повернуто`;
+    
+    document.getElementById('debtsList').innerHTML = data.length === 0 
+      ? '<div class="empty-state"><div class="empty-icon">🤝</div><div class="empty-title">Немає боргів</div><div class="empty-sub">Всі розрахувались!</div></div>'
+      : data.map(d => `
+        <div class="debt-card ${d.status === 'returned' ? 'returned' : ''}">
+          <div class="debt-header">
+            <span class="debt-who">${d.person_name}</span>
+            <span class="debt-status-badge ${d.status}">${d.status === 'active' ? 'Не повернуто' : 'Повернуто ✓'}</span>
+          </div>
+          <div class="debt-row"><span>Сума</span><span class="debt-val">₴ ${fmt(d.amount)}</span></div>
+          <div class="debt-row"><span>Видано</span><span class="debt-val">${fmtDate(d.date_given)}</span></div>
+          <div class="debt-row"><span>З рахунку</span><span class="debt-val">${d.account_name || '—'}</span></div>
+          ${d.note ? `<div class="debt-row"><span>Коментар</span><span class="debt-val">${d.note}</span></div>` : ''}
+          ${d.status === 'active' ? `<div class="debt-actions">
+            <button class="btn btn-green btn-sm" onclick="returnDebt(${d.id})">✓ Повернуто</button>
+          </div>` : ''}
+        </div>`).join('');
+  } catch(e) { console.error('loadDebts', e); }
+}
+
+async function loadAccounts() {
+  try {
+    const r = await fetch(`${API}/api/accounts`, { headers: { Authorization: 'Bearer ' + token } });
+    const data = await r.json();
+    accounts = data.accounts || [];
+    document.getElementById('accountsGrid').innerHTML = accounts.map(a => {
+      const bal = parseFloat(a.current_balance || 0);
+      const isGap = bal < 0;
+      return `
+        <div class="account-card ${isGap ? 'danger' : ''}">
+          <div class="account-header">
+            <div>
+              <div class="account-name">${a.name}</div>
+              <div class="account-bank">${a.bank || (a.type === 'cash' ? 'Готівка (ручний облік)' : '—')}</div>
+            </div>
+            <span class="account-badge ${a.api_type ? 'badge-api' : 'badge-manual'}">${a.api_type ? 'API авто' : 'Вручну'}</span>
+          </div>
+          <div class="account-balance ${isGap ? 'neg' : 'pos'}">₴ ${fmt(Math.abs(bal))}${isGap ? ' ⚠' : ''}</div>
+          <div class="account-stats">
+            <div><div class="acc-stat-lbl">Початковий залишок</div><div class="acc-stat-val">₴ ${fmt(a.initial_balance || 0)}</div></div>
+            <div><div class="acc-stat-lbl">Тип</div><div class="acc-stat-val">${a.type === 'fop' ? 'ФОП' : a.type === 'cash' ? 'Готівка' : 'Картка'}</div></div>
+          </div>
+          ${currentUser.role === 'admin' ? `<div class="account-actions">
+            <button class="btn btn-ghost btn-sm" onclick="archiveAccount(${a.id})">Архівувати</button>
+          </div>` : ''}
+        </div>`;
+    }).join('') || '<div class="empty-state"><div class="empty-icon">💳</div><div class="empty-title">Немає рахунків</div></div>';
+  } catch(e) { console.error('loadAccounts', e); }
+}
+
+async function loadWithdrawals() {
+  try {
+    const r = await fetch(`${API}/api/withdrawals?month=${currentMonth}&year=${currentYear}`, {
+      headers: { Authorization: 'Bearer ' + token }
+    });
+    const data = await r.json();
+    
+    // Totals by owner
+    const totals = {};
+    data.forEach(w => { totals[w.owner] = (totals[w.owner] || 0) + parseFloat(w.amount); });
+    
+    document.getElementById('withdrawalsList').innerHTML = `
+      <div class="big-card" style="margin-bottom:16px">
+        <div class="big-card-title">Підсумок за місяць</div>
+        ${Object.entries(totals).map(([owner, total]) => `
+          <div class="cf-row"><span class="cf-lbl">${owner}</span><span class="cf-val neg">−₴ ${fmt(total)}</span></div>`).join('') || '<div style="color:var(--muted);font-size:13px">Немає виводів</div>'}
+      </div>
+      ${data.map(w => `
+        <div class="big-card" style="margin-bottom:10px">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div><strong>${w.owner}</strong> · ${fmtDate(w.date)}</div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:16px;font-weight:700;color:var(--red)">−₴ ${fmt(w.amount)}</div>
+          </div>
+          <div style="font-size:12px;color:var(--muted);margin-top:6px">${w.account_name || '—'} ${w.note ? '· ' + w.note : ''}</div>
+        </div>`).join('') || ''}`;
+  } catch(e) { console.error(e); }
+}
+
+async function loadTransfers() {
+  try {
+    const r = await fetch(`${API}/api/transactions?type=transfer`, {
+      headers: { Authorization: 'Bearer ' + token }
+    });
+    const data = await r.json();
+    document.getElementById('transfersList').innerHTML = data.length === 0
+      ? '<div class="empty-state"><div class="empty-icon">🔄</div><div class="empty-title">Немає переводів</div></div>'
+      : data.map(t => `
+        <div class="big-card" style="margin-bottom:10px">
+          <div style="display:flex;align-items:center;gap:12px">
+            <div style="flex:1">
+              <div style="font-size:13px;font-weight:600">${t.account_name || '—'} → ${t.account_to_name || '—'}</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:3px">${fmtDate(t.date)} ${t.note ? '· ' + t.note : ''}</div>
+            </div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:16px;font-weight:700;color:var(--blue)">₴ ${fmt(t.amount)}</div>
+          </div>
+        </div>`).join('');
+  } catch(e) { console.error(e); }
+}
+
+async function loadCashCount() {
+  try {
+    const r = await fetch(`${API}/api/cash-count/history`, { headers: { Authorization: 'Bearer ' + token } });
+    const data = await r.json();
+    document.getElementById('cashHistory').innerHTML = data.length === 0
+      ? '<div style="color:var(--muted);font-size:13px">Немає перерахунків</div>'
+      : data.map(c => `
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div style="font-size:13px;font-weight:600">${fmtDate(c.date)}</div>
+            <div style="font-size:11px;color:var(--muted)">Виконав: ${c.created_by_name || '—'}</div>
+          </div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:16px;font-weight:700;color:var(--green)">₴ ${fmt(c.total)}</div>
+        </div>`).join('');
+  } catch(e) { console.error(e); }
+}
+
+async function loadCurrencyReserve() {
+  try {
+    const r = await fetch(`${API}/api/currency/reserve`, { headers: { Authorization: 'Bearer ' + token } });
+    const data = await r.json();
+    
+    document.getElementById('currencySummary').innerHTML = `
+      <div class="big-card-title">Загальна позиція</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px">
+        <div><div style="font-size:11px;color:var(--muted)">Всього в резерві</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:20px;font-weight:700;color:var(--blue)">$ ${fmtUSD(data.total_usd)}</div></div>
+        <div><div style="font-size:11px;color:var(--muted)">P&L (курсова різниця)</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:20px;font-weight:700;color:${(data.total_pnl||0)>=0 ? 'var(--green)' : 'var(--red)'}">${(data.total_pnl||0)>=0?'+':''}₴ ${fmt(data.total_pnl||0)}</div></div>
+        <div><div style="font-size:11px;color:var(--muted)">Курс НБУ сьогодні</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:20px;font-weight:700;color:var(--text)">${document.getElementById('usdRate').textContent}</div></div>
+      </div>`;
+    
+    document.getElementById('currencyList').innerHTML = (data.operations || []).map(op => `
+      <div class="currency-card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <span class="op-type ${op.type === 'buy' ? 'op-buy' : 'op-sell'}">${op.type === 'buy' ? 'Купівля' : 'Продаж'}</span>
+          <span style="font-size:12px;color:var(--muted)">${fmtDate(op.date)}</span>
+        </div>
+        <div class="op-row"><span>Сума UAH</span><span>₴ ${fmt(op.amount_uah)}</span></div>
+        <div class="op-row"><span>Сума USD</span><span>$ ${fmtUSD(op.amount_usd)}</span></div>
+        <div class="op-row"><span>Курс</span><span>${parseFloat(op.rate).toFixed(4)}</span></div>
+        ${op.profit_loss !== null ? `<div class="op-row"><span>П/З</span><span class="${parseFloat(op.profit_loss)>=0 ? 'pnl-pos' : 'pnl-neg'}">${parseFloat(op.profit_loss)>=0?'+':''}₴ ${fmt(op.profit_loss)}</span></div>` : ''}
+      </div>`).join('') || '<div class="empty-state"><div class="empty-icon">💱</div><div class="empty-title">Немає операцій</div></div>';
+  } catch(e) { console.error(e); }
+}
+
+async function loadSummary(refresh = false) {
+  try {
+    const r = await fetch(`${API}/api/summary/weekly${refresh ? '?refresh=1' : ''}`, {
+      headers: { Authorization: 'Bearer ' + token }
+    });
+    const data = await r.json();
+    document.getElementById('summaryPeriod').textContent = `${fmtDate(data.week_start)} — ${fmtDate(data.week_end)}`;
+    
+    document.getElementById('summaryContent').innerHTML = `
+      <div class="summary-grid">
+        <div class="summary-card">
+          <div class="summary-card-title">Приходи за тиждень</div>
+          ${(data.income?.by_account || []).map(a => `
+            <div class="cf-row"><span class="cf-lbl">${a.account_name}</span><span class="cf-val pos">+₴ ${fmt(a.total)}</span></div>`).join('') || '<div style="color:var(--muted);font-size:13px">Немає приходів</div>'}
+          <div class="cf-total-row"><span class="cf-total-lbl">Всього</span><span class="cf-total-val">+₴ ${fmt(data.income?.total || 0)}</span></div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-card-title">Залишки по рахунках</div>
+          ${(data.balances || []).map(a => `
+            <div class="cf-row">
+              <span class="cf-lbl">${a.name}</span>
+              <span class="cf-val ${parseFloat(a.balance)<0 ? 'neg' : 'pos'}">₴ ${fmt(a.balance)}</span>
+            </div>`).join('')}
+          <div class="cf-total-row"><span class="cf-total-lbl">Разом</span><span class="cf-total-val">₴ ${fmt(data.total_balance || 0)}</span></div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-card-title">Витрати FC / VC</div>
+          <div class="cf-row"><span class="cf-lbl">Fix Costs</span><span class="cf-val neg">−₴ ${fmt(data.expenses?.fc || 0)}</span></div>
+          <div class="cf-row"><span class="cf-lbl">Variable Costs</span><span class="cf-val neg">−₴ ${fmt(data.expenses?.vc || 0)}</span></div>
+          <div class="cf-total-row"><span class="cf-total-lbl">Всього</span><span class="cf-total-val" style="color:var(--red)">−₴ ${fmt(data.expenses?.total || 0)}</span></div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-card-title">Вивід власників</div>
+          ${(data.owner_withdrawals || []).map(w => `
+            <div class="cf-row"><span class="cf-lbl">${w.owner}</span><span class="cf-val neg">−₴ ${fmt(w.total)}</span></div>`).join('') || '<div style="color:var(--muted);font-size:13px">Немає виводів</div>'}
+          ${data.currency_reserve ? `
+            <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+              <div style="font-size:11px;color:var(--muted);margin-bottom:6px">Валютний резерв</div>
+              <div class="cf-row"><span class="cf-lbl">Всього USD</span><span class="cf-val blue">$ ${fmtUSD(data.currency_reserve.total_usd)}</span></div>
+              <div class="cf-row"><span class="cf-lbl">P&L</span><span class="cf-val ${(data.currency_reserve.total_pnl||0)>=0?'pos':'neg'}">${(data.currency_reserve.total_pnl||0)>=0?'+':''}₴ ${fmt(data.currency_reserve.total_pnl||0)}</span></div>
+            </div>` : ''}
+        </div>
+      </div>`;
+  } catch(e) { console.error(e); }
+}
+
+async function loadAutopay() {
+  try {
+    const r = await fetch(`${API}/api/recurring`, { headers: { Authorization: 'Bearer ' + token } });
+    const data = await r.json();
+    const freqLabels = { monthly: 'Щомісяця', twice_monthly: '2 рази на місяць', weekly: 'Щотижня' };
+    document.getElementById('autopayList').innerHTML = data.length === 0
+      ? '<div class="empty-state"><div class="empty-icon">🔁</div><div class="empty-title">Немає автоплатежів</div><div class="empty-sub">Додай шаблон для повторюваних платежів</div></div>'
+      : data.map(t => `
+        <div class="big-card" style="margin-bottom:10px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start">
+            <div>
+              <div style="font-size:14px;font-weight:600">${t.name}</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:3px">${t.category_name || '—'} · ${t.account_name || '—'}</div>
+              <div style="font-size:11px;color:var(--muted)">${freqLabels[t.frequency] || t.frequency} · ${t.day_of_month}-е число</div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:700;color:var(--red)">₴ ${fmt(t.amount)}</div>
+              ${currentUser.role === 'admin' ? `<button class="btn btn-ghost btn-sm" style="margin-top:6px" onclick="deleteAutopay(${t.id})">Видалити</button>` : ''}
+            </div>
+          </div>
+        </div>`).join('');
+  } catch(e) { console.error(e); }
+}
+
+// ============ ACTIONS ============
+function showScreen(name, el) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('screen-' + name).classList.add('active');
+  if (el) el.classList.add('active');
+  
+  const titles = { calendar:'Платіжний календар', cashflow:'Кеш-флоу', accounts:'Рахунки та ФОП', transfers:'Переводи', withdrawals:'Вивід власника', debts:'Борги', cashcount:'Купюрниця', currency:'Валютний резерв', summary:'Тижнева зведка', autopay:'Автоплатежі', users:'Користувачі' };
+  document.getElementById('topbarTitle').textContent = titles[name] || name;
+  
+  const hidePeriod = ['accounts','debts','cashcount','currency','summary','autopay','users','transfers'];
+  document.getElementById('periodCtrl').style.display = hidePeriod.includes(name) ? 'none' : 'flex';
+
+  if (name === 'accounts') loadAccounts();
+  else if (name === 'debts') loadDebts();
+  else if (name === 'cashcount') loadCashCount();
+  else if (name === 'currency') loadCurrencyReserve();
+  else if (name === 'summary') loadSummary();
+  else if (name === 'autopay') loadAutopay();
+  else if (name === 'withdrawals') loadWithdrawals();
+  else if (name === 'transfers') loadTransfers();
+  else if (name === 'cashflow') loadCashflow();
+}
+
+function changePeriod(dir) {
+  currentMonth += dir;
+  if (currentMonth > 12) { currentMonth = 1; currentYear++; }
+  if (currentMonth < 1) { currentMonth = 12; currentYear--; }
+  updatePeriodLabel();
+  loadCalendar();
+  loadBalances();
+  loadCashflow();
+}
+
+function updatePeriodLabel() {
+  const months = ['Січень','Лютий','Березень','Квітень','Травень','Червень','Липень','Серпень','Вересень','Жовтень','Листопад','Грудень'];
+  document.getElementById('periodLabel').textContent = `${months[currentMonth-1]} ${currentYear}`;
+}
+
+function openCellModal(catId, catName, day) {
+  selectedCell = { catId, catName, day };
+  const date = `${currentYear}-${String(currentMonth).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+  document.getElementById('txDate').value = date;
+  document.getElementById('addModalSub').textContent = `${catName || 'Нова операція'} · ${day} ${['','Січ','Лют','Бер','Квіт','Трав','Черв','Лип','Серп','Вер','Жовт','Лист','Груд'][currentMonth]}`;
+  if (catId) {
+    const sel = document.getElementById('txCategory');
+    sel.value = catId;
+  }
+  document.getElementById('addModal').classList.add('show');
+}
+
+function openAddModal() {
+  selectedCell = null;
+  const today = new Date().toISOString().split('T')[0];
+  document.getElementById('txDate').value = today;
+  document.getElementById('addModalSub').textContent = 'Нова операція';
+  document.getElementById('addModal').classList.add('show');
+}
+
+function setTxType(type) {
+  txType = type;
+  document.getElementById('typeExpense').className = 'type-btn' + (type === 'expense' ? ' active-expense' : '');
+  document.getElementById('typeIncome').className = 'type-btn' + (type === 'income' ? ' active-income' : '');
+}
+
+function setStatus(s) {
+  txStatus = s;
+  document.querySelectorAll('.pill').forEach(p => p.classList.remove('active'));
+  document.querySelector(`.pill.${s}`).classList.add('active');
+}
+
+async function saveTransaction() {
+  const amount = document.getElementById('txAmount').value;
+  const date = document.getElementById('txDate').value;
+  const account_id = document.getElementById('txAccount').value;
+  const category_id = document.getElementById('txCategory').value;
+  const note = document.getElementById('txNote').value;
+  
+  if (!amount || !date || !account_id) { showToast('Заповни всі обов\'язкові поля', 'error'); return; }
+  
+  try {
+    const r = await fetch(API + '/api/transactions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({ type: txType, date, amount: parseFloat(amount), account_id: parseInt(account_id), category_id: category_id ? parseInt(category_id) : null, note })
+    });
+    if (r.ok) {
+      closeModal('addModal');
+      showToast('Платіж додано ✓', 'success');
+      loadCalendar();
+      loadBalances();
+      loadCashflow();
+    } else {
+      const err = await r.json();
+      showToast(err.error || 'Помилка', 'error');
+    }
+  } catch(e) { showToast('Помилка з\'єднання', 'error'); }
+}
+
+async function saveDebt() {
+  const person_name = document.getElementById('debtPerson').value;
+  const amount = document.getElementById('debtAmount').value;
+  const date_given = document.getElementById('debtDate').value;
+  const account_id = document.getElementById('debtAccount').value;
+  const note = document.getElementById('debtNote').value;
+  if (!person_name || !amount || !date_given) { showToast('Заповни всі поля', 'error'); return; }
+  try {
+    const r = await fetch(API + '/api/debts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({ person_name, amount: parseFloat(amount), date_given, account_id: parseInt(account_id), note })
+    });
+    if (r.ok) { closeModal('debtModal'); showToast('Борг збережено ✓', 'success'); loadDebts(); }
+  } catch(e) { showToast('Помилка', 'error'); }
+}
+
+async function returnDebt(id) {
+  try {
+    const r = await fetch(`${API}/api/debts/${id}/return`, {
+      method: 'POST', headers: { Authorization: 'Bearer ' + token }
+    });
+    if (r.ok) { showToast('Борг повернуто ✓', 'success'); loadDebts(); }
+  } catch(e) { showToast('Помилка', 'error'); }
+}
+
+async function saveWithdrawal() {
+  const owner = document.getElementById('wOwner').value;
+  const amount = document.getElementById('wAmount').value;
+  const date = document.getElementById('wDate').value;
+  const account_id = document.getElementById('wAccount').value;
+  const note = document.getElementById('wNote').value;
+  if (!amount || !date) { showToast('Заповни всі поля', 'error'); return; }
+  try {
+    const r = await fetch(API + '/api/withdrawals', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({ owner, amount: parseFloat(amount), date, account_id: parseInt(account_id), note })
+    });
+    if (r.ok) { closeModal('withdrawalModal'); showToast('Вивід збережено ✓', 'success'); loadWithdrawals(); loadBalances(); }
+    else { const e = await r.json(); showToast(e.error || 'Помилка', 'error'); }
+  } catch(e) { showToast('Помилка', 'error'); }
+}
+
+async function saveCurrencyOp() {
+  const amount_uah = document.getElementById('cAmount').value;
+  const date = document.getElementById('cDate').value;
+  const account_id = document.getElementById('cAccount').value;
+  const note = document.getElementById('cNote').value;
+  if (!amount_uah || !date) { showToast('Заповни всі поля', 'error'); return; }
+  const endpoint = currencyOpType === 'buy' ? '/api/currency/reserve/buy' : '/api/currency/reserve/sell';
+  const body = currencyOpType === 'buy' 
+    ? { date, amount_uah: parseFloat(amount_uah), account_id: parseInt(account_id), note }
+    : { date, amount_usd: parseFloat(amount_uah), account_id: parseInt(account_id), note };
+  try {
+    const r = await fetch(API + endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify(body)
+    });
+    const data = await r.json();
+    if (r.ok) {
+      closeModal('currencyModal');
+      const msg = data.profit_loss_label ? `Збережено · ${data.profit_loss_label}` : 'Збережено ✓';
+      showToast(msg, 'success');
+      loadCurrencyReserve();
+    } else { showToast(data.error || 'Помилка', 'error'); }
+  } catch(e) { showToast('Помилка', 'error'); }
+}
+
+function calcCash() {
+  const denoms = [1000,500,200,100,50,20];
+  let total = 0;
+  denoms.forEach(d => {
+    const val = parseInt(document.getElementById('d'+d).value) || 0;
+    const sub = val * d;
+    total += sub;
+    document.getElementById('t'+d).textContent = `= ₴ ${fmt(sub)}`;
+  });
+  document.getElementById('cashTotal').textContent = `₴ ${fmt(total)}`;
+}
+
+async function saveCashCount() {
+  const today = new Date().toISOString().split('T')[0];
+  const body = {
+    date: today,
+    d1000: parseInt(document.getElementById('d1000').value)||0,
+    d500: parseInt(document.getElementById('d500').value)||0,
+    d200: parseInt(document.getElementById('d200').value)||0,
+    d100: parseInt(document.getElementById('d100').value)||0,
+    d50: parseInt(document.getElementById('d50').value)||0,
+    d20: parseInt(document.getElementById('d20').value)||0,
+    d10: 0
+  };
+  try {
+    const r = await fetch(API + '/api/cash-count', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify(body)
+    });
+    if (r.ok) { showToast('Перерахунок збережено ✓', 'success'); loadCashCount(); loadBalances(); }
+  } catch(e) { showToast('Помилка', 'error'); }
+}
+
+async function archiveAccount(id) {
+  if (!confirm('Архівувати цей рахунок?')) return;
+  try {
+    const r = await fetch(`${API}/api/accounts/${id}/archive`, {
+      method: 'POST', headers: { Authorization: 'Bearer ' + token }
+    });
+    const data = await r.json();
+    if (r.ok) { showToast('Рахунок архівовано ✓', 'success'); loadAccounts(); }
+    else { showToast(data.error || 'Помилка', 'error'); }
+  } catch(e) { showToast('Помилка', 'error'); }
+}
+
+async function deleteAutopay(id) {
+  if (!confirm('Видалити цей автоплатіж?')) return;
+  try {
+    await fetch(`${API}/api/recurring/${id}`, { method: 'DELETE', headers: { Authorization: 'Bearer ' + token } });
+    showToast('Видалено ✓', 'success'); loadAutopay();
+  } catch(e) { showToast('Помилка', 'error'); }
+}
+
+function openDebtModal() {
+  document.getElementById('debtDate').value = new Date().toISOString().split('T')[0];
+  document.getElementById('debtModal').classList.add('show');
+}
+function openWithdrawalModal() {
+  document.getElementById('wDate').value = new Date().toISOString().split('T')[0];
+  document.getElementById('withdrawalModal').classList.add('show');
+}
+function openCurrencyModal(type) {
+  currencyOpType = type;
+  document.getElementById('currencyModalTitle').textContent = type === 'buy' ? 'Купити USD (відкласти в резерв)' : 'Продати USD (завести в гривні)';
+  document.getElementById('cDate').value = new Date().toISOString().split('T')[0];
+  document.getElementById('currencyModal').classList.add('show');
+}
+function openTransferModal() { showToast('Функція в розробці', 'error'); }
+function openAddAccountModal() { showToast('Функція в розробці', 'error'); }
+function openAutopayModal() { showToast('Функція в розробці', 'error'); }
+function exportData() { showToast('Функція вигрузки в розробці', 'error'); }
+
+function closeModal(id) { document.getElementById(id).classList.remove('show'); }
+
+document.querySelectorAll('.modal-overlay').forEach(el => {
+  el.addEventListener('click', e => { if (e.target === el) el.classList.remove('show'); });
+});
+
+function logout() {
+  localStorage.removeItem('ikorka_token');
+  location.reload();
+}
+
+function showToast(msg, type = 'success') {
+  const t = document.getElementById('toast');
+  t.textContent = (type === 'success' ? '✅ ' : '❌ ') + msg;
+  t.className = 'toast show ' + type;
+  setTimeout(() => t.className = 'toast', 3000);
+}
+
+// ============ UTILS ============
+function fmt(n) {
+  const num = parseFloat(n) || 0;
+  return new Intl.NumberFormat('uk-UA', { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(Math.abs(num));
+}
+function fmtH(n) { return '₴ ' + fmt(n || 0); }
+function fmtUSD(n) { return parseFloat(n || 0).toFixed(2); }
+function fmtShort(n) {
+  const num = parseFloat(n) || 0;
+  if (num >= 1000) return Math.round(num/1000) + 'к';
+  return Math.round(num).toString();
+}
+function fmtDate(d) {
+  if (!d) return '—';
+  return new Date(d).toLocaleDateString('uk-UA', { day:'numeric', month:'short', year:'numeric' });
+}
+
+// Auto-login if token exists
+window.addEventListener('load', async () => {
+  if (token) {
+    try {
+      const r = await fetch(API + '/api/auth/me', { headers: { Authorization: 'Bearer ' + token } });
+      if (r.ok) {
+        const data = await r.json();
+        currentUser = data.user;
+        initApp();
+      } else { localStorage.removeItem('ikorka_token'); token = null; }
+    } catch(e) { localStorage.removeItem('ikorka_token'); token = null; }
+  }
+});
+</script>
+</body>
+</html>
