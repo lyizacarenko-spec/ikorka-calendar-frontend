@@ -723,6 +723,56 @@ select.form-input { appearance:none; }
   </div>
 </div>
 
+<!-- DEBT PAYMENT MODAL -->
+<div class="modal-overlay" id="paymentModal">
+  <div class="modal">
+    <div class="modal-title">Внести повернення</div>
+    <div class="modal-sub" id="paymentModalSub">—</div>
+    <input type="hidden" id="payDebtId">
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Сума повернення (₴)</label>
+        <input class="form-input" type="number" id="payAmount" placeholder="0" step="0.01">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Дата</label>
+        <input class="form-input" type="date" id="payDate">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Спосіб</label>
+      <select class="form-input" id="payMethod">
+        <option value="cash">Готівка (нал)</option>
+        <option value="transfer">Безготівка (безнал)</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">На який рахунок</label>
+      <select class="form-input" id="payAccount"></select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Коментар</label>
+      <input class="form-input" type="text" id="payNote" placeholder="Необов'язково...">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-cancel" onclick="closeModal('paymentModal')">Скасувати</button>
+      <button class="btn btn-green" onclick="savePayment()">Зберегти повернення</button>
+    </div>
+  </div>
+</div>
+
+<!-- PAYMENTS HISTORY MODAL -->
+<div class="modal-overlay" id="paymentsHistoryModal">
+  <div class="modal">
+    <div class="modal-title">Історія повернень</div>
+    <div class="modal-sub" id="phSub">—</div>
+    <div id="phList" style="max-height:340px;overflow-y:auto"></div>
+    <div class="modal-actions">
+      <button class="btn btn-cancel" onclick="closeModal('paymentsHistoryModal')">Закрити</button>
+    </div>
+  </div>
+</div>
+
 <!-- BALANCE MODAL -->
 <div class="modal-overlay" id="balanceModal">
   <div class="modal">
@@ -1180,24 +1230,32 @@ async function loadDebts() {
     
     document.getElementById('debtsList').innerHTML = data.length === 0 
       ? '<div class="empty-state"><div class="empty-icon">🤝</div><div class="empty-title">Немає боргів</div><div class="empty-sub">Всі розрахувались!</div></div>'
-      : data.map(d => `
+      : data.map(d => {
+        const total = parseFloat(d.amount);
+        const paid = parseFloat(d.paid || 0);
+        const remaining = parseFloat(d.remaining || total);
+        const pct = total > 0 ? Math.min(100, Math.round(paid / total * 100)) : 0;
+        return `
         <div class="debt-card ${d.status === 'returned' ? 'returned' : ''}">
           <div class="debt-header">
             <span class="debt-who">${d.person_name}</span>
-            <span class="debt-status-badge ${d.status}">${d.status === 'active' ? 'Не повернуто' : 'Повернуто ✓'}</span>
+            <span class="debt-status-badge ${d.status}">${d.status === 'active' ? 'Активний борг' : 'Погашено ✓'}</span>
           </div>
-          <div class="debt-row"><span>Сума</span><span class="debt-val">₴ ${fmt(d.amount)}</span></div>
-          <div class="debt-row"><span>Видано</span><span class="debt-val">${fmtDate(d.date_given)}</span></div>
-          <div class="debt-row"><span>З рахунку</span><span class="debt-val">${d.account_name || '—'}</span></div>
+          <div class="debt-row"><span>Сума боргу</span><span class="debt-val">₴ ${fmt(total)}</span></div>
+          <div class="debt-row"><span>Повернуто</span><span class="debt-val" style="color:var(--green)">₴ ${fmt(paid)}</span></div>
+          <div class="debt-row"><span>Залишок</span><span class="debt-val" style="color:${remaining > 0 ? 'var(--amber)' : 'var(--green)'};font-size:15px">₴ ${fmt(remaining)}</span></div>
+          <div style="background:var(--surface2);border-radius:6px;height:8px;margin:10px 0;overflow:hidden">
+            <div style="background:var(--green);height:100%;width:${pct}%;transition:width .3s"></div>
+          </div>
+          <div class="debt-row"><span>Видано</span><span class="debt-val">${fmtDate(d.date_given)} · ${d.account_name || '—'}</span></div>
           ${d.note ? `<div class="debt-row"><span>Коментар</span><span class="debt-val">${d.note}</span></div>` : ''}
-          ${d.status === 'active' ? `<div class="debt-actions">
-            <button class="btn btn-green btn-sm" onclick="openReturnDebtModal(${d.id}, '${d.person_name}', ${d.amount})">✓ Повернуто</button>
-            ${currentUser.role === 'admin' ? `<button class="btn btn-ghost btn-sm" onclick="deleteDebt(${d.id})">🗑 Видалити</button>` : ''}
-          </div>` : `
           <div class="debt-actions">
-            ${currentUser.role === 'admin' ? `<button class="btn btn-ghost btn-sm" onclick="deleteDebt(${d.id})">🗑 Видалити</button>` : ''}
-          </div>`}
-        </div>`).join('');
+            ${d.status === 'active' ? `<button class="btn btn-green btn-sm" onclick="openPaymentModal(${d.id}, '${(d.person_name||'').replace(/'/g,"\\'")}', ${remaining})">+ Внести повернення</button>` : ''}
+            <button class="btn btn-ghost btn-sm" onclick="showPayments(${d.id}, '${(d.person_name||'').replace(/'/g,"\\'")}')">Історія</button>
+            ${currentUser.role === 'admin' ? `<button class="btn btn-ghost btn-sm" onclick="deleteDebt(${d.id})">🗑</button>` : ''}
+          </div>
+        </div>`;
+      }).join('');
   } catch(e) { console.error('loadDebts', e); }
 }
 
@@ -1552,6 +1610,67 @@ async function confirmReturnDebt() {
       loadBalances();
     }
   } catch(e) { showToast('Помилка', 'error'); }
+}
+
+function openPaymentModal(debtId, name, remaining) {
+  document.getElementById('payDebtId').value = debtId;
+  document.getElementById('paymentModalSub').textContent = `${name} · залишок ₴ ${fmt(remaining)}`;
+  document.getElementById('payAmount').value = '';
+  document.getElementById('payNote').value = '';
+  document.getElementById('payDate').value = new Date().toISOString().split('T')[0];
+  const sel = document.getElementById('payAccount');
+  sel.innerHTML = accounts.map(a => `<option value="${a.id}">${a.name}</option>`).join('');
+  document.getElementById('paymentModal').classList.add('show');
+}
+
+async function savePayment() {
+  const debtId = document.getElementById('payDebtId').value;
+  const amount = document.getElementById('payAmount').value;
+  const date = document.getElementById('payDate').value;
+  const method = document.getElementById('payMethod').value;
+  const account_id = document.getElementById('payAccount').value;
+  const note = document.getElementById('payNote').value;
+  if (!amount || !date) { showToast('Введи суму і дату', 'error'); return; }
+  try {
+    const r = await fetch(`${API}/api/debts/${debtId}/payment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({ amount: parseFloat(amount), date, method, account_id: parseInt(account_id), note })
+    });
+    const data = await r.json();
+    if (r.ok) {
+      closeModal('paymentModal');
+      showToast(data.remaining > 0 ? `Внесено. Залишок ₴ ${fmt(data.remaining)}` : 'Борг погашено повністю ✓', 'success');
+      loadDebts();
+      loadBalances();
+    } else {
+      showToast(data.error || 'Помилка', 'error');
+    }
+  } catch(e) { showToast('Помилка з\'єднання', 'error'); }
+}
+
+async function showPayments(debtId, name) {
+  document.getElementById('phSub').textContent = name;
+  document.getElementById('phList').innerHTML = '<div class="loader"><div class="spinner"></div></div>';
+  document.getElementById('paymentsHistoryModal').classList.add('show');
+  try {
+    const r = await fetch(`${API}/api/debts/${debtId}/payments`, {
+      headers: { Authorization: 'Bearer ' + token }
+    });
+    const data = await r.json();
+    document.getElementById('phList').innerHTML = data.length === 0
+      ? '<div style="color:var(--muted);font-size:13px;padding:20px;text-align:center">Ще немає повернень</div>'
+      : data.map(p => `
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:10px;background:var(--surface2);border-radius:8px;margin-bottom:6px">
+          <div>
+            <div style="font-size:13px;font-weight:600;color:var(--green)">+₴ ${fmt(p.amount)}</div>
+            <div style="font-size:11px;color:var(--muted)">${fmtDate(p.date)} · ${p.method === 'cash' ? 'готівка' : 'безнал'} · ${p.account_name || '—'}</div>
+            ${p.note ? `<div style="font-size:11px;color:var(--dim)">${p.note}</div>` : ''}
+          </div>
+        </div>`).join('');
+  } catch(e) {
+    document.getElementById('phList').innerHTML = '<div style="color:var(--red)">Помилка завантаження</div>';
+  }
 }
 
 async function deleteDebt(id) {
