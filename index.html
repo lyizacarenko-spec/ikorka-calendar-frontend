@@ -722,6 +722,26 @@ select.form-input { appearance:none; }
   </div>
 </div>
 
+<!-- BALANCE MODAL -->
+<div class="modal-overlay" id="balanceModal">
+  <div class="modal">
+    <div class="modal-title">Внести залишок</div>
+    <div class="modal-sub" id="balanceModalSub">—</div>
+    <input type="hidden" id="balAccountId">
+    <div class="form-group">
+      <label class="form-label">Актуальний залишок на рахунку (₴)</label>
+      <input class="form-input" type="number" id="balValue" placeholder="0" step="0.01">
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:8px">
+      Впиши суму, яку показує банк зараз. Система підлаштує баланс під це число.
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-cancel" onclick="closeModal('balanceModal')">Скасувати</button>
+      <button class="btn btn-primary" onclick="saveBalance()">Зберегти</button>
+    </div>
+  </div>
+</div>
+
 <!-- RETURN DEBT MODAL -->
 <div class="modal-overlay" id="returnDebtModal">
   <div class="modal">
@@ -1203,7 +1223,7 @@ async function loadAccounts() {
             <div><div class="acc-stat-lbl">Тип</div><div class="acc-stat-val">${a.type === 'fop' ? 'ФОП' : a.type === 'cash' ? 'Готівка' : 'Картка'}</div></div>
           </div>
           ${currentUser.role === 'admin' ? `<div class="account-actions">
-            ${a.api_type === 'novapay' ? `<button class="btn btn-primary btn-sm" onclick="syncNovapay(${a.id})">🔄 Синхронізувати</button>` : ''}
+            ${a.api_type === 'novapay' ? `<button class="btn btn-primary btn-sm" onclick="syncNovapay(${a.id})">🔄 Синхронізувати</button>` : `<button class="btn btn-primary btn-sm" onclick="openBalanceModal(${a.id}, '${(a.name||'').replace(/'/g,"\\'")}', ${parseFloat(a.current_balance||0)})">✏️ Внести залишок</button>`}
             <button class="btn btn-ghost btn-sm" onclick="archiveAccount(${a.id})">Архівувати</button>
           </div>` : ''}
         </div>`;
@@ -1610,6 +1630,35 @@ async function saveCashCount() {
     });
     if (r.ok) { showToast('Перерахунок збережено ✓', 'success'); loadCashCount(); loadBalances(); }
   } catch(e) { showToast('Помилка', 'error'); }
+}
+
+function openBalanceModal(id, name, currentBal) {
+  document.getElementById('balAccountId').value = id;
+  document.getElementById('balanceModalSub').textContent = name + ' · зараз ₴ ' + fmt(currentBal);
+  document.getElementById('balValue').value = '';
+  document.getElementById('balanceModal').classList.add('show');
+}
+
+async function saveBalance() {
+  const id = document.getElementById('balAccountId').value;
+  const value = document.getElementById('balValue').value;
+  if (value === '') { showToast('Введи суму', 'error'); return; }
+  try {
+    const r = await fetch(`${API}/api/accounts/${id}/set-balance`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({ balance: parseFloat(value) })
+    });
+    if (r.ok) {
+      closeModal('balanceModal');
+      showToast('Залишок оновлено ✓', 'success');
+      loadAccounts();
+      loadBalances();
+    } else {
+      const e = await r.json();
+      showToast(e.error || 'Помилка', 'error');
+    }
+  } catch(e) { showToast('Помилка з\'єднання', 'error'); }
 }
 
 async function syncNovapay(id) {
