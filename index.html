@@ -602,6 +602,40 @@ select.form-input { appearance:none; }
             <div class="denom-total" id="t20">= ₴ 0</div>
           </div>
         </div>
+
+        <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin:20px 0 10px">Монети</div>
+        <div class="cash-count-grid">
+          <div class="denomination-card">
+            <div class="denom-label">₴ 10</div>
+            <input class="denom-input" type="number" id="d10" value="0" min="0" oninput="calcCash()">
+            <div class="denom-total" id="t10">= ₴ 0</div>
+          </div>
+          <div class="denomination-card">
+            <div class="denom-label">₴ 5</div>
+            <input class="denom-input" type="number" id="d5" value="0" min="0" oninput="calcCash()">
+            <div class="denom-total" id="t5">= ₴ 0</div>
+          </div>
+          <div class="denomination-card">
+            <div class="denom-label">₴ 2</div>
+            <input class="denom-input" type="number" id="d2" value="0" min="0" oninput="calcCash()">
+            <div class="denom-total" id="t2">= ₴ 0</div>
+          </div>
+          <div class="denomination-card">
+            <div class="denom-label">₴ 1</div>
+            <input class="denom-input" type="number" id="d1" value="0" min="0" oninput="calcCash()">
+            <div class="denom-total" id="t1">= ₴ 0</div>
+          </div>
+          <div class="denomination-card">
+            <div class="denom-label">50 коп.</div>
+            <input class="denom-input" type="number" id="d50k" value="0" min="0" oninput="calcCash()">
+            <div class="denom-total" id="t50k">= ₴ 0</div>
+          </div>
+          <div class="denomination-card">
+            <div class="denom-label">10 коп.</div>
+            <input class="denom-input" type="number" id="d10k" value="0" min="0" oninput="calcCash()">
+            <div class="denom-total" id="t10k">= ₴ 0</div>
+          </div>
+        </div>
         <button class="btn btn-primary" style="width:100%;padding:12px;font-size:14px" onclick="saveCashCount()">💾 Зберегти перерахунок</button>
         <div style="margin-top:20px">
           <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">Історія перерахунків</div>
@@ -1878,28 +1912,33 @@ async function saveCurrencyOp() {
 }
 
 function calcCash() {
-  const denoms = [1000,500,200,100,50,20];
+  // Купюри + монети. Копійки: 50k = 0.5 грн, 10k = 0.1 грн
+  const denoms = [
+    ['1000', 1000], ['500', 500], ['200', 200], ['100', 100], ['50', 50], ['20', 20],
+    ['10', 10], ['5', 5], ['2', 2], ['1', 1], ['50k', 0.5], ['10k', 0.1]
+  ];
   let total = 0;
-  denoms.forEach(d => {
-    const val = parseInt(document.getElementById('d'+d).value) || 0;
-    const sub = val * d;
+  denoms.forEach(([id, value]) => {
+    const el = document.getElementById('d' + id);
+    if (!el) return;
+    const count = parseInt(el.value) || 0;
+    const sub = count * value;
     total += sub;
-    document.getElementById('t'+d).textContent = `= ₴ ${fmt(sub)}`;
+    const t = document.getElementById('t' + id);
+    if (t) t.textContent = `= ₴ ${fmt(sub)}`;
   });
   document.getElementById('cashTotal').textContent = `₴ ${fmt(total)}`;
 }
 
 async function saveCashCount() {
   const today = new Date().toISOString().split('T')[0];
+  const g = id => parseInt(document.getElementById(id)?.value) || 0;
   const body = {
     date: today,
-    d1000: parseInt(document.getElementById('d1000').value)||0,
-    d500: parseInt(document.getElementById('d500').value)||0,
-    d200: parseInt(document.getElementById('d200').value)||0,
-    d100: parseInt(document.getElementById('d100').value)||0,
-    d50: parseInt(document.getElementById('d50').value)||0,
-    d20: parseInt(document.getElementById('d20').value)||0,
-    d10: 0
+    d1000: g('d1000'), d500: g('d500'), d200: g('d200'),
+    d100: g('d100'), d50: g('d50'), d20: g('d20'),
+    d10: g('d10'), d5: g('d5'), d2: g('d2'), d1: g('d1'),
+    d50k: g('d50k'), d10k: g('d10k')
   };
   try {
     const r = await fetch(API + '/api/cash-count', {
