@@ -1438,6 +1438,10 @@ function updatePeriodLabel() {
 
 function openCellModal(catId, catName, day) {
   selectedCell = { catId, catName, day };
+  setStatus('planned');
+  setTxType('expense');
+  document.getElementById('txAmount').value = '';
+  document.getElementById('txNote').value = '';
   const date = `${currentYear}-${String(currentMonth).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
   document.getElementById('txDate').value = date;
   document.getElementById('addModalSub').textContent = `${catName || 'Нова операція'} · ${day} ${['','Січ','Лют','Бер','Квіт','Трав','Черв','Лип','Серп','Вер','Жовт','Лист','Груд'][currentMonth]}`;
@@ -1450,6 +1454,10 @@ function openCellModal(catId, catName, day) {
 
 function openAddModal() {
   selectedCell = null;
+  setStatus('planned');
+  setTxType('expense');
+  document.getElementById('txAmount').value = '';
+  document.getElementById('txNote').value = '';
   const today = new Date().toISOString().split('T')[0];
   document.getElementById('txDate').value = today;
   document.getElementById('addModalSub').textContent = 'Нова операція';
@@ -1481,7 +1489,7 @@ async function saveTransaction() {
     const r = await fetch(API + '/api/transactions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-      body: JSON.stringify({ type: txType, date, amount: parseFloat(amount), account_id: parseInt(account_id), category_id: category_id ? parseInt(category_id) : null, note })
+      body: JSON.stringify({ type: txType, date, amount: parseFloat(amount), account_id: parseInt(account_id), category_id: category_id ? parseInt(category_id) : null, note, status: txStatus })
     });
     if (r.ok) {
       closeModal('addModal');
