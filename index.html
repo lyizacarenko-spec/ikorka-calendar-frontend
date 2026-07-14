@@ -1051,6 +1051,7 @@ async function initApp() {
   await loadCalendar();
   await loadBalances();
   await loadCashflow();
+  await loadUpcoming();
   await loadDebts();
 }
 
@@ -1215,6 +1216,46 @@ function renderCalendar(data) {
 
   html += '</tbody></table>';
   document.getElementById('calWrap').innerHTML = html;
+}
+
+async function loadUpcoming() {
+  try {
+    const r = await fetch(`${API}/api/transactions?status=planned&type=expense`, {
+      headers: { Authorization: 'Bearer ' + token }
+    });
+    const data = await r.json();
+    const today = new Date(); today.setHours(0,0,0,0);
+
+    // Найближчі 6 запланованих, відсортовані за датою
+    const upcoming = data
+      .map(t => ({ ...t, d: new Date(t.date) }))
+      .sort((a, b) => a.d - b.d)
+      .slice(0, 6);
+
+    const el = document.getElementById('upcomingList');
+    if (upcoming.length === 0) {
+      el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:8px 0">Немає запланованих</div>';
+      return;
+    }
+
+    el.innerHTML = upcoming.map(t => {
+      const diff = Math.round((t.d - today) / 86400000);
+      const overdue = diff < 0;
+      const when = overdue ? 'прострочено' : diff === 0 ? 'сьогодні' : diff === 1 ? 'завтра' : `через ${diff} дн.`;
+      return `
+        <div class="up-item">
+          <div class="up-dot ${overdue ? 'over' : 'plan'}"></div>
+          <div class="up-info">
+            <div class="up-name">${t.category_name || t.note || 'Платіж'}</div>
+            <div class="up-date">${fmtDate(t.date)} · ${when}</div>
+          </div>
+          <div class="up-sum">−${fmt(t.amount)}</div>
+        </div>`;
+    }).join('');
+  } catch(e) {
+    document.getElementById('upcomingList').innerHTML =
+      '<div style="color:var(--muted);font-size:12px">Помилка завантаження</div>';
+  }
 }
 
 async function loadCashflow() {
@@ -1570,6 +1611,7 @@ function changePeriod(dir) {
   loadCalendar();
   loadBalances();
   loadCashflow();
+  loadUpcoming();
 }
 
 function updatePeriodLabel() {
@@ -1646,7 +1688,7 @@ async function deleteOp(id) {
     if (r.ok) {
       showToast('Платіж видалено ✓', 'success');
       closeModal('dayOpsModal');
-      loadCalendar(); loadBalances(); loadCashflow();
+      loadCalendar(); loadBalances(); loadCashflow(); loadUpcoming();
     } else {
       showToast('Помилка видалення', 'error');
     }
