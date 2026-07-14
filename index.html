@@ -1203,6 +1203,7 @@ async function loadAccounts() {
             <div><div class="acc-stat-lbl">Тип</div><div class="acc-stat-val">${a.type === 'fop' ? 'ФОП' : a.type === 'cash' ? 'Готівка' : 'Картка'}</div></div>
           </div>
           ${currentUser.role === 'admin' ? `<div class="account-actions">
+            ${a.api_type === 'novapay' ? `<button class="btn btn-primary btn-sm" onclick="syncNovapay(${a.id})">🔄 Синхронізувати</button>` : ''}
             <button class="btn btn-ghost btn-sm" onclick="archiveAccount(${a.id})">Архівувати</button>
           </div>` : ''}
         </div>`;
@@ -1609,6 +1610,24 @@ async function saveCashCount() {
     });
     if (r.ok) { showToast('Перерахунок збережено ✓', 'success'); loadCashCount(); loadBalances(); }
   } catch(e) { showToast('Помилка', 'error'); }
+}
+
+async function syncNovapay(id) {
+  showToast('Синхронізація з NovaPay...', 'success');
+  try {
+    const r = await fetch(`${API}/api/novapay/sync/${id}`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + token }
+    });
+    const data = await r.json();
+    if (r.ok && data.success) {
+      showToast(`${data.account}: ₴ ${fmt(data.balance)}`, 'success');
+      loadAccounts();
+      loadBalances();
+    } else {
+      showToast(data.error || 'Помилка синхронізації', 'error');
+    }
+  } catch(e) { showToast('Помилка з\'єднання', 'error'); }
 }
 
 async function archiveAccount(id) {
