@@ -1472,8 +1472,10 @@ function setTxType(type) {
 
 function setStatus(s) {
   txStatus = s;
-  document.querySelectorAll('.pill').forEach(p => p.classList.remove('active'));
-  document.querySelector(`.pill.${s}`).classList.add('active');
+  document.querySelectorAll('#addModal .pill').forEach(p => p.classList.remove('active'));
+  const cls = s === 'paid' ? 'paid' : 'plan';
+  const el = document.querySelector(`#addModal .pill.${cls}`);
+  if (el) el.classList.add('active');
 }
 
 async function saveTransaction() {
