@@ -723,6 +723,22 @@ select.form-input { appearance:none; }
   </div>
 </div>
 
+<!-- DAY OPERATIONS MODAL -->
+<div class="modal-overlay" id="dayOpsModal">
+  <div class="modal">
+    <div class="modal-title">Платежі за день</div>
+    <div class="modal-sub" id="dayOpsSub">—</div>
+    <input type="hidden" id="dayOpsCat">
+    <input type="hidden" id="dayOpsCatName">
+    <input type="hidden" id="dayOpsDay">
+    <div id="dayOpsList" style="max-height:340px;overflow-y:auto;margin-bottom:12px"></div>
+    <div class="modal-actions">
+      <button class="btn btn-cancel" onclick="closeModal('dayOpsModal')">Закрити</button>
+      <button class="btn btn-primary" onclick="addMoreToDay()">+ Додати ще</button>
+    </div>
+  </div>
+</div>
+
 <!-- DEBT PAYMENT MODAL -->
 <div class="modal-overlay" id="paymentModal">
   <div class="modal">
@@ -930,6 +946,7 @@ let txType = 'expense';
 let txStatus = 'planned';
 let currencyOpType = 'buy';
 let accounts = [];
+let calData = [];
 let categories = [];
 let selectedCell = null;
 
@@ -1096,6 +1113,7 @@ async function loadCalendar() {
 }
 
 function renderCalendar(data) {
+  calData = data;
   const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
   const today = new Date();
   let html = '<table class="cal-table"><thead><tr>';
@@ -1141,12 +1159,12 @@ function renderCalendar(data) {
       for (let d = 1; d <= daysInMonth; d++) {
         const dayOps = item.days?.[d] || [];
         if (dayOps.length === 0) {
-          html += `<td class="cell s-empty" onclick="openCellModal(${cat.id || 0}, '${cat.name || ''}', ${d})"><div class="cell-inner"></div></td>`;
+          html += `<td class="cell s-empty" onclick="cellClick(${cat.id || 0}, '${(cat.name||'').replace(/'/g,"\\'")}', ${d})"><div class="cell-inner"></div></td>`;
         } else {
           const op = dayOps[0];
           const cls = op.status === 'confirmed' ? 's-confirmed' : op.status === 'paid' ? 's-paid' : 's-plan';
           const totalDay = dayOps.reduce((s, o) => s + parseFloat(o.amount), 0);
-          html += `<td class="cell ${cls}" onclick="openCellModal(${cat.id || 0}, '${cat.name || ''}', ${d})">
+          html += `<td class="cell ${cls}" onclick="cellClick(${cat.id || 0}, '${(cat.name||'').replace(/'/g,"\\'")}', ${d})">
             <div class="cell-inner">${fmtShort(totalDay)}</div></td>`;
         }
       }
@@ -1495,8 +1513,86 @@ function updatePeriodLabel() {
   document.getElementById('periodLabel').textContent = `${months[currentMonth-1]} ${currentYear}`;
 }
 
+function cellClick(catId, catName, day) {
+  // Знаходимо операції цього дня для цієї категорії
+  const cat = calData.find(c => (c.category?.id || 0) === catId);
+  const dayOps = cat?.days?.[day] || [];
+  if (dayOps.length === 0) {
+    openCellModal(catId, catName, day);
+  } else {
+    showDayOps(catId, catName, day, dayOps);
+  }
+}
+
+function showDayOps(catId, catName, day, ops) {
+  const monthShort = ['','Січ','Лют','Бер','Квіт','Трав','Черв','Лип','Серп','Вер','Жовт','Лист','Груд'][currentMonth];
+  document.getElementById('dayOpsSub').textContent = `${catName} · ${day} ${monthShort}`;
+  document.getElementById('dayOpsCat').value = catId;
+  document.getElementById('dayOpsCatName').value = catName;
+  document.getElementById('dayOpsDay').value = day;
+
+  const statusLabel = { planned: '⏳ Заплановано', paid: '✓ Оплачено', confirmed: '✓ В економіку' };
+  const statusColor = { planned: 'var(--amber)', paid: 'var(--green)', confirmed: 'var(--green)' };
+
+  document.getElementById('dayOpsList').innerHTML = ops.map(op => `
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:12px;background:var(--surface2);border-radius:8px;margin-bottom:8px">
+      <div style="flex:1">
+        <div style="font-size:15px;font-weight:700;font-family:'JetBrains Mono',monospace">₴ ${fmt(op.amount)}</div>
+        <div style="font-size:11px;color:${statusColor[op.status]||'var(--muted)'}">${statusLabel[op.status]||op.status}</div>
+        <div style="font-size:11px;color:var(--muted)">${op.account || '—'}</div>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-ghost btn-sm" onclick="editOp(${op.id}, ${op.amount}, '${op.status}', ${op.account_id||'null'})">✏️</button>
+        <button class="btn btn-ghost btn-sm" onclick="deleteOp(${op.id})">🗑</button>
+      </div>
+    </div>`).join('');
+  document.getElementById('dayOpsModal').classList.add('show');
+}
+
+function addMoreToDay() {
+  const catId = document.getElementById('dayOpsCat').value;
+  const catName = document.getElementById('dayOpsCatName').value;
+  const day = document.getElementById('dayOpsDay').value;
+  closeModal('dayOpsModal');
+  openCellModal(parseInt(catId), catName, parseInt(day));
+}
+
+let editingOpId = null;
+
+function editOp(id, amount, status, accountId) {
+  closeModal('dayOpsModal');
+  const catId = document.getElementById('dayOpsCat').value;
+  const catName = document.getElementById('dayOpsCatName').value;
+  const day = document.getElementById('dayOpsDay').value;
+  openCellModal(parseInt(catId), catName, parseInt(day));
+  // Після openCellModal (яка скинула editingOpId) — ставимо режим редагування
+  editingOpId = id;
+  document.getElementById('txAmount').value = amount;
+  if (accountId) document.getElementById('txAccount').value = accountId;
+  setStatus(status === 'planned' ? 'planned' : 'paid');
+  document.getElementById('addModal').querySelector('.modal-title').textContent = 'Редагувати платіж';
+}
+
+async function deleteOp(id) {
+  if (!confirm('Видалити цей платіж?')) return;
+  try {
+    const r = await fetch(`${API}/api/transactions/${id}`, {
+      method: 'DELETE', headers: { Authorization: 'Bearer ' + token }
+    });
+    if (r.ok) {
+      showToast('Платіж видалено ✓', 'success');
+      closeModal('dayOpsModal');
+      loadCalendar(); loadBalances(); loadCashflow();
+    } else {
+      showToast('Помилка видалення', 'error');
+    }
+  } catch(e) { showToast('Помилка', 'error'); }
+}
+
 function openCellModal(catId, catName, day) {
   selectedCell = { catId, catName, day };
+  editingOpId = null;
+  document.getElementById('addModal').querySelector('.modal-title').textContent = 'Додати платіж';
   setStatus('planned');
   setTxType('expense');
   document.getElementById('txAmount').value = '';
@@ -1513,6 +1609,8 @@ function openCellModal(catId, catName, day) {
 
 function openAddModal() {
   selectedCell = null;
+  editingOpId = null;
+  document.getElementById('addModal').querySelector('.modal-title').textContent = 'Додати платіж';
   setStatus('planned');
   setTxType('expense');
   document.getElementById('txAmount').value = '';
@@ -1547,12 +1645,33 @@ async function saveTransaction() {
   if (!amount || !date || !account_id) { showToast('Заповни всі обов\'язкові поля', 'error'); return; }
   
   try {
-    const r = await fetch(API + '/api/transactions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-      body: JSON.stringify({ type: txType, date, amount: parseFloat(amount), account_id: parseInt(account_id), category_id: category_id ? parseInt(category_id) : null, note, status: txStatus })
-    });
+    let r;
+    if (editingOpId) {
+      // Редагування існуючої операції
+      r = await fetch(`${API}/api/transactions/${editingOpId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({ date, amount: parseFloat(amount), account_id: parseInt(account_id), category_id: category_id ? parseInt(category_id) : null, note })
+      });
+      // Оновлюємо статус окремо
+      if (r.ok) {
+        await fetch(`${API}/api/transactions/${editingOpId}/status`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+          body: JSON.stringify({ status: txStatus })
+        });
+      }
+    } else {
+      // Створення нової
+      r = await fetch(API + '/api/transactions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({ type: txType, date, amount: parseFloat(amount), account_id: parseInt(account_id), category_id: category_id ? parseInt(category_id) : null, note, status: txStatus })
+      });
+    }
     if (r.ok) {
+      editingOpId = null;
+      document.getElementById('addModal').querySelector('.modal-title').textContent = 'Додати платіж';
       closeModal('addModal');
       showToast('Платіж додано ✓', 'success');
       loadCalendar();
