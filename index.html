@@ -672,7 +672,10 @@ select.form-input { appearance:none; }
             <div class="section-title">Тижневий звіт</div>
             <div class="section-sub" id="summaryPeriod">Завантаження...</div>
           </div>
-          <button class="btn btn-ghost" onclick="loadSummary(true)">🔄 Оновити</button>
+         <div style="display:flex;gap:8px;align-items:center">
+            <input type="date" id="summaryDate" class="form-input" style="width:auto;padding:6px 10px" onchange="loadSummary(true)">
+            <button class="btn btn-ghost" onclick="loadSummary(true)">🔄 Оновити</button>
+          </div>
         </div>
         <div id="summaryContent"><div class="loader"><div class="spinner"></div></div></div>
       </div>
