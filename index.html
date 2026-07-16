@@ -1514,7 +1514,10 @@ async function loadCurrencyReserve() {
 
 async function loadSummary(refresh = false) {
   try {
-    const r = await fetch(`${API}/api/summary/weekly${refresh ? '?refresh=1' : ''}`, {
+    const dateEl = document.getElementById('summaryDate');
+    const dateParam = dateEl && dateEl.value ? `date=${dateEl.value}` : '';
+    const params = [dateParam, refresh ? 'refresh=1' : ''].filter(Boolean).join('&');
+    const r = await fetch(`${API}/api/summary/weekly${params ? '?' + params : ''}`, {
       headers: { Authorization: 'Bearer ' + token }
     });
     const data = await r.json();
