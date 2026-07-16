@@ -1586,7 +1586,7 @@ function showScreen(name, el) {
   document.getElementById('screen-' + name).classList.add('active');
   if (el) el.classList.add('active');
   
-  const titles = { calendar:'Платіжний календар', cashflow:'Кеш-флоу', accounts:'Рахунки та ФОП', transfers:'Переводи', withdrawals:'Вивід власника', debts:'Борги', cashcount:'Купюрниця', currency:'Валютний резерв', summary:'Тижнева зведка', autopay:'Автоплатежі', users:'Користувачі' };
+  const titles = { calendar:'Платіжний календар', cashflow:'Кеш-флоу', accounts:'Рахунки та ФОП', transfers:'Переводи', withdrawals:'Вивід власника', debts:'Борги', cashcount:'Купюрниця', currency:'Валютний резерв', summary:'Тижневий звіт', autopay:'Автоплатежі', users:'Користувачі' };
   document.getElementById('topbarTitle').textContent = titles[name] || name;
   
   const hidePeriod = ['accounts','debts','cashcount','currency','summary','autopay','users','transfers'];
