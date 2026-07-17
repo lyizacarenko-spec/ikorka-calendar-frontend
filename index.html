@@ -778,6 +778,33 @@ select.form-input { appearance:none; }
   </div>
 </div>
 
+<!-- NOVAPAY STATEMENT MODAL -->
+<div class="modal-overlay" id="statementModal">
+  <div class="modal" style="width:520px">
+    <div class="modal-title">Виписка</div>
+    <div class="modal-sub" id="statementSub">—</div>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <button class="btn btn-ghost btn-sm" onclick="setStatementPeriod('day')">День</button>
+      <button class="btn btn-ghost btn-sm" onclick="setStatementPeriod('week')">Тиждень</button>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">З</label>
+        <input class="form-input" type="date" id="stFrom" onchange="loadStatement()">
+      </div>
+      <div class="form-group">
+        <label class="form-label">По</label>
+        <input class="form-input" type="date" id="stTo" onchange="loadStatement()">
+      </div>
+    </div>
+    <div id="stBalance" style="font-size:14px;font-weight:700;font-family:'JetBrains Mono',monospace;margin:8px 0 14px"></div>
+    <div id="stList" style="max-height:400px;overflow-y:auto"></div>
+    <div class="modal-actions">
+      <button class="btn btn-cancel" onclick="closeModal('statementModal')">Закрити</button>
+    </div>
+  </div>
+</div>
+
 <!-- DAY OPERATIONS MODAL -->
 <div class="modal-overlay" id="dayOpsModal">
   <div class="modal">
@@ -1412,8 +1439,10 @@ async function loadAccounts() {
     document.getElementById('accountsGrid').innerHTML = accounts.map(a => {
       const bal = parseFloat(a.current_balance || 0);
       const isGap = bal < 0;
+      const isNovapay = a.api_type === 'novapay';
+      const cardClick = isNovapay ? `onclick="openStatementModal(${a.id}, '${(a.name||'').replace(/'/g,"\\'")}')" style="cursor:pointer"` : '';
       return `
-        <div class="account-card ${isGap ? 'danger' : ''}">
+        <div class="account-card ${isGap ? 'danger' : ''}" ${cardClick}>
           <div class="account-header">
             <div>
               <div class="account-name">${a.name}</div>
@@ -1427,8 +1456,8 @@ async function loadAccounts() {
             <div><div class="acc-stat-lbl">Тип</div><div class="acc-stat-val">${a.type === 'fop' ? 'ФОП' : a.type === 'cash' ? 'Готівка' : 'Картка'}</div></div>
           </div>
           ${currentUser.role === 'admin' ? `<div class="account-actions">
-            ${a.api_type === 'novapay' ? `<button class="btn btn-primary btn-sm" onclick="syncNovapay(${a.id})">🔄 Синхронізувати</button>` : `<button class="btn btn-primary btn-sm" onclick="openBalanceModal(${a.id}, '${(a.name||'').replace(/'/g,"\\'")}', ${parseFloat(a.current_balance||0)})">✏️ Внести залишок</button>`}
-            <button class="btn btn-ghost btn-sm" onclick="archiveAccount(${a.id})">Архівувати</button>
+            ${a.api_type === 'novapay' ? `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); syncNovapay(${a.id})">🔄 Синхронізувати</button>` : `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); openBalanceModal(${a.id}, '${(a.name||'').replace(/'/g,"\\'")}', ${parseFloat(a.current_balance||0)})">✏️ Внести залишок</button>`}
+            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); archiveAccount(${a.id})">Архівувати</button>
           </div>` : ''}
         </div>`;
     }).join('') || '<div class="empty-state"><div class="empty-icon">💳</div><div class="empty-title">Немає рахунків</div></div>';
@@ -2071,6 +2100,68 @@ async function saveBalance() {
       showToast(e.error || 'Помилка', 'error');
     }
   } catch(e) { showToast('Помилка з\'єднання', 'error'); }
+}
+
+let statementAccountId = null;
+
+function toISODate(d) { return d.toISOString().split('T')[0]; }
+
+function openStatementModal(id, name) {
+  statementAccountId = id;
+  document.getElementById('statementSub').textContent = name;
+  const today = new Date();
+  const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+  document.getElementById('stTo').value = toISODate(today);
+  document.getElementById('stFrom').value = toISODate(weekAgo);
+  document.getElementById('statementModal').classList.add('show');
+  loadStatement();
+}
+
+function setStatementPeriod(kind) {
+  const today = new Date();
+  const from = kind === 'day' ? today : new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+  document.getElementById('stTo').value = toISODate(today);
+  document.getElementById('stFrom').value = toISODate(from);
+  loadStatement();
+}
+
+async function loadStatement() {
+  if (!statementAccountId) return;
+  const from = document.getElementById('stFrom').value;
+  const to = document.getElementById('stTo').value;
+  const listEl = document.getElementById('stList');
+  document.getElementById('stBalance').textContent = '';
+  listEl.innerHTML = '<div class="loader"><div class="spinner"></div> Завантаження...</div>';
+  try {
+    const r = await fetch(`${API}/api/novapay/extract/${statementAccountId}?from=${from}&to=${to}`, {
+      headers: { Authorization: 'Bearer ' + token }
+    });
+    const data = await r.json();
+    if (!r.ok || !data.success) {
+      listEl.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-title">${data.error || 'Помилка завантаження'}</div></div>`;
+      return;
+    }
+    document.getElementById('stBalance').textContent = `Баланс: ₴ ${fmt(data.balance)}`;
+    const ops = data.operations || [];
+    if (!ops.length) {
+      listEl.innerHTML = '<div class="empty-state"><div class="empty-icon">📭</div><div class="empty-title">Немає операцій за період</div></div>';
+      return;
+    }
+    listEl.innerHTML = ops.map(op => {
+      const color = op.sign === '+' ? 'var(--green)' : (op.sign === '-' ? 'var(--red)' : 'var(--muted)');
+      return `
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px;background:var(--surface2);border-radius:8px;margin-bottom:8px">
+          <div style="flex:1;min-width:0">
+            <div style="font-size:11px;color:var(--muted)">${op.date || '—'}</div>
+            <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${op.counterparty || '—'}</div>
+            <div style="font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${op.purpose || ''}</div>
+          </div>
+          <div style="font-size:14px;font-weight:700;font-family:'JetBrains Mono',monospace;color:${color};white-space:nowrap">${op.sign || ''}₴ ${fmt(Math.abs(op.amount || 0))}</div>
+        </div>`;
+    }).join('');
+  } catch(e) {
+    listEl.innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-title">Помилка з\'єднання</div></div>';
+  }
 }
 
 async function syncNovapay(id) {
