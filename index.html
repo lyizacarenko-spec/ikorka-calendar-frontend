@@ -66,6 +66,12 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
 }
 .sidebar-logo-title { font-size:13px; font-weight:700; letter-spacing:0.3px; }
 .sidebar-logo-sub { font-size:11px; color:var(--muted); margin-top:2px; }
+.sidebar-pilot-badge {
+  display:inline-block; margin-top:8px; padding:2px 8px;
+  font-size:10px; font-weight:600; letter-spacing:0.4px;
+  color:var(--amber); background:var(--amber-bg);
+  border:1px solid var(--amber-border); border-radius:20px;
+}
 .sidebar-rate {
   padding:8px 16px; background:var(--blue-bg); border-bottom:1px solid var(--border);
   display:flex; gap:12px; font-size:11px; color:var(--muted);
@@ -391,6 +397,7 @@ select.form-input { appearance:none; }
     <div class="sidebar-logo">
       <div class="sidebar-logo-title">💰 IKORKA FINANCE</div>
       <div class="sidebar-logo-sub">Платіжний календар</div>
+      <div class="sidebar-pilot-badge">ПІЛОТНА ВЕРСІЯ</div>
     </div>
     <div class="sidebar-rate" id="rateBar">
       <span>USD: <strong id="usdRate">—</strong></span>
