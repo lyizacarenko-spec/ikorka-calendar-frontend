@@ -1529,8 +1529,8 @@ async function loadAccounts() {
     document.getElementById('accountsGrid').innerHTML = accounts.map(a => {
       const bal = parseFloat(a.current_balance || 0);
       const isGap = bal < 0;
-      const isNovapay = a.api_type === 'novapay';
-      const cardClick = isNovapay ? `onclick="openStatementModal(${a.id}, '${(a.name||'').replace(/'/g,"\\'")}')" style="cursor:pointer"` : '';
+      const isBankLinked = a.api_type === 'novapay' || a.api_type === 'privat';
+      const cardClick = isBankLinked ? `onclick="openStatementModal(${a.id}, '${(a.name||'').replace(/'/g,"\\'")}')" style="cursor:pointer"` : '';
       return `
         <div class="account-card ${isGap ? 'danger' : ''}" ${cardClick}>
           <div class="account-header">
@@ -1546,7 +1546,7 @@ async function loadAccounts() {
             <div><div class="acc-stat-lbl">Тип</div><div class="acc-stat-val">${a.type === 'fop' ? 'ФОП' : a.type === 'cash' ? 'Готівка' : 'Картка'}</div></div>
           </div>
           ${currentUser.role === 'admin' ? `<div class="account-actions">
-            ${a.api_type === 'novapay' ? `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); syncNovapay(${a.id})">🔄 Синхронізувати</button>` : `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); openBalanceModal(${a.id}, '${(a.name||'').replace(/'/g,"\\'")}', ${parseFloat(a.current_balance||0)})">✏️ Внести залишок</button>`}
+            ${isBankLinked ? `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); syncNovapay(${a.id})">🔄 Синхронізувати</button>` : `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); openBalanceModal(${a.id}, '${(a.name||'').replace(/'/g,"\\'")}', ${parseFloat(a.current_balance||0)})">✏️ Внести залишок</button>`}
             <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); archiveAccount(${a.id})">Архівувати</button>
           </div>` : ''}
         </div>`;
@@ -2444,16 +2444,16 @@ async function loadAnalytics() {
   if (!from || !to) return;
   document.getElementById('analyticsSub').textContent = `${from} — ${to}`;
 
-  const novapayAccounts = accounts.filter(a => a.api_type === 'novapay' && a.has_api_token);
+  const bankAccounts = accounts.filter(a => (a.api_type === 'novapay' || a.api_type === 'privat') && a.has_api_token);
   const tbody = document.getElementById('analyticsBody');
   setAnalyticsTotals({ income: 0, expense: 0, self: 0, unknown: 0, unknownCount: 0, balance: 0, opening: 0, openingMissing: false });
 
-  if (!novapayAccounts.length) {
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:20px">Немає ФОП з NovaPay</td></tr>';
+  if (!bankAccounts.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:20px">Немає підключених банківських ФОП</td></tr>';
     return;
   }
 
-  tbody.innerHTML = novapayAccounts.map(a => `
+  tbody.innerHTML = bankAccounts.map(a => `
     <tr id="anRow-${a.id}">
       <td>${a.name}</td>
       <td colspan="5" style="color:var(--muted);font-family:'Inter',sans-serif">
@@ -2463,7 +2463,7 @@ async function loadAnalytics() {
 
   const totals = { income: 0, expense: 0, self: 0, unknown: 0, unknownCount: 0, balance: 0, opening: 0, openingMissing: false };
 
-  for (const acc of novapayAccounts) {
+  for (const acc of bankAccounts) {
     if (signal.aborted) return;
     const row = document.getElementById(`anRow-${acc.id}`);
     try {
@@ -2488,8 +2488,10 @@ async function loadAnalytics() {
       }
       const balance = parseFloat(data.balance || 0);
       const opening = data.openingBalance === null || data.openingBalance === undefined ? null : parseFloat(data.openingBalance);
-      const credit = income;
-      const debit = expense + self;
+      // ПриватБанк повертає готові обороти по днях (creditTurnover/debitTurnover) — надійніше,
+      // ніж підсумовувати операції клієнтською стороною. NovaPay такого не дає — рахуємо самі.
+      const credit = data.creditTurnover !== undefined ? parseFloat(data.creditTurnover) : income;
+      const debit = data.debitTurnover !== undefined ? parseFloat(data.debitTurnover) : (expense + self);
 
       totals.income += income;
       totals.expense += expense;
@@ -2516,8 +2518,10 @@ async function loadAnalytics() {
   }
 }
 
+// Назва історична — роут /api/novapay/sync диспетчеризується на бекенді за api_type
+// рахунку (novapay/privat), тож ця функція викликається для обох банків.
 async function syncNovapay(id) {
-  showToast('Синхронізація з NovaPay...', 'success');
+  showToast('Синхронізація з банком...', 'success');
   try {
     const r = await fetch(`${API}/api/novapay/sync/${id}`, {
       method: 'POST',
