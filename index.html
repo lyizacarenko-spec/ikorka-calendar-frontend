@@ -730,7 +730,7 @@ select.form-input { appearance:none; }
         <div style="overflow-x:auto">
           <table class="analytics-table">
             <thead>
-              <tr><th>ФОП</th><th>Прихід</th><th>Списання</th><th>Перекази собі</th><th>Баланс</th></tr>
+              <tr><th>ФОП</th><th>Прихід</th><th>Списання</th><th>Перекази собі</th><th>Невизначені</th><th>Баланс</th></tr>
             </thead>
             <tbody id="analyticsBody"></tbody>
             <tfoot>
@@ -739,6 +739,7 @@ select.form-input { appearance:none; }
                 <td id="anTotalIncome">—</td>
                 <td id="anTotalExpense">—</td>
                 <td id="anTotalSelf">—</td>
+                <td id="anTotalUnknown">—</td>
                 <td id="anTotalBalance">—</td>
               </tr>
             </tfoot>
@@ -2289,6 +2290,7 @@ function setAnalyticsTotals(t) {
   document.getElementById('anTotalIncome').textContent = `+₴ ${fmt(t.income)}`;
   document.getElementById('anTotalExpense').textContent = `−₴ ${fmt(t.expense)}`;
   document.getElementById('anTotalSelf').textContent = `₴ ${fmt(t.self)}`;
+  document.getElementById('anTotalUnknown').textContent = t.unknownCount ? `${t.unknownCount} · ₴ ${fmt(t.unknown)}` : '—';
   document.getElementById('anTotalBalance').textContent = `₴ ${fmt(t.balance)}`;
 }
 
@@ -2308,22 +2310,22 @@ async function loadAnalytics() {
 
   const novapayAccounts = accounts.filter(a => a.api_type === 'novapay' && a.has_api_token);
   const tbody = document.getElementById('analyticsBody');
-  setAnalyticsTotals({ income: 0, expense: 0, self: 0, balance: 0 });
+  setAnalyticsTotals({ income: 0, expense: 0, self: 0, unknown: 0, unknownCount: 0, balance: 0 });
 
   if (!novapayAccounts.length) {
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px">Немає ФОП з NovaPay</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:20px">Немає ФОП з NovaPay</td></tr>';
     return;
   }
 
   tbody.innerHTML = novapayAccounts.map(a => `
     <tr id="anRow-${a.id}">
       <td>${a.name}</td>
-      <td colspan="4" style="color:var(--muted);font-family:'Inter',sans-serif">
+      <td colspan="5" style="color:var(--muted);font-family:'Inter',sans-serif">
         <div class="spinner" style="width:14px;height:14px;display:inline-block;vertical-align:middle;margin-right:6px"></div>завантаження...
       </td>
     </tr>`).join('');
 
-  const totals = { income: 0, expense: 0, self: 0, balance: 0 };
+  const totals = { income: 0, expense: 0, self: 0, unknown: 0, unknownCount: 0, balance: 0 };
 
   for (const acc of novapayAccounts) {
     if (signal.aborted) return;
@@ -2336,22 +2338,25 @@ async function loadAnalytics() {
       if (signal.aborted) return;
 
       if (!r.ok || !data.success) {
-        if (row) row.innerHTML = `<td>${acc.name}</td><td colspan="4" style="color:var(--red);font-family:'Inter',sans-serif">${data.error || 'Помилка'}</td>`;
+        if (row) row.innerHTML = `<td>${acc.name}</td><td colspan="5" style="color:var(--red);font-family:'Inter',sans-serif">${data.error || 'Помилка'}</td>`;
         continue;
       }
 
-      let income = 0, expense = 0, self = 0;
+      let income = 0, expense = 0, self = 0, unknown = 0, unknownCount = 0;
       for (const op of (data.operations || [])) {
         const amt = Math.abs(op.amount || 0);
         if (op.isSelfTransfer) self += amt;
         else if (op.sign === '+') income += amt;
         else if (op.sign === '-') expense += amt;
+        else { unknown += amt; unknownCount++; }
       }
       const balance = parseFloat(data.balance || 0);
 
       totals.income += income;
       totals.expense += expense;
       totals.self += self;
+      totals.unknown += unknown;
+      totals.unknownCount += unknownCount;
       totals.balance += balance;
       setAnalyticsTotals(totals);
 
@@ -2360,10 +2365,11 @@ async function loadAnalytics() {
         <td style="color:var(--green)">+₴ ${fmt(income)}</td>
         <td style="color:var(--red)">−₴ ${fmt(expense)}</td>
         <td style="color:var(--muted)">₴ ${fmt(self)}</td>
+        <td style="${unknownCount ? 'color:var(--amber)' : 'color:var(--muted)'}">${unknownCount ? `${unknownCount} · ₴ ${fmt(unknown)}` : '—'}</td>
         <td>₴ ${fmt(balance)}</td>`;
     } catch(e) {
       if (e.name === 'AbortError') return;
-      if (row) row.innerHTML = `<td>${acc.name}</td><td colspan="4" style="color:var(--red);font-family:'Inter',sans-serif">Помилка з'єднання</td>`;
+      if (row) row.innerHTML = `<td>${acc.name}</td><td colspan="5" style="color:var(--red);font-family:'Inter',sans-serif">Помилка з'єднання</td>`;
     }
   }
 }
