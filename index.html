@@ -166,7 +166,15 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
 
 .cal-table { border-collapse:collapse; font-size:12px; }
 .cal-table th { background:var(--surface); border:1px solid var(--border); padding:6px 6px; position:sticky; top:0; z-index:10; white-space:nowrap; }
-.col-art { width:190px; min-width:170px; text-align:left; }
+/* Стаття — липка колонка зліва при горизонтальному скролі (застосовується і до th, і до
+   td першої колонки; фон обов'язково непрозорий, інакше дні, що скроляться під неї, будуть
+   просвічувати крізь текст статті). ВАЖЛИВО: .art-cell використовується ще й для другої
+   колонки ("Тип"), тому sticky тут — окремо, лише на .col-art, а не на .art-cell,
+   інакше обидві колонки приліпляться одна на одну.
+*/
+.col-art { width:190px; min-width:170px; text-align:left; position:sticky; left:0; z-index:12; }
+td.col-art { z-index:5; background:var(--bg); }
+.data-row:hover td.col-art { background:var(--surface2); }
 .col-note { width:80px; min-width:80px; text-align:left; }
 .col-sum { width:80px; text-align:right; }
 .col-day { width:72px; min-width:72px; text-align:center; }
@@ -1292,7 +1300,7 @@ function renderCalendar(data) {
       Object.values(item.days || {}).forEach(ops => ops.forEach(o => monthTotal += parseFloat(o.amount)));
       
       html += `<tr class="data-row">
-        <td class="art-cell">
+        <td class="art-cell col-art">
           <div class="art-name">${cat.name || '—'}
             ${cat.cost_type ? `<span class="art-badge ${cat.cost_type.toLowerCase()}">${cat.cost_type}</span>` : ''}
             ${isNoecon ? '<span class="art-badge noecon">КФ</span>' : ''}
