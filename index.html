@@ -2306,7 +2306,7 @@ async function loadAnalytics() {
   if (!from || !to) return;
   document.getElementById('analyticsSub').textContent = `${from} — ${to}`;
 
-  const novapayAccounts = accounts.filter(a => a.api_type === 'novapay');
+  const novapayAccounts = accounts.filter(a => a.api_type === 'novapay' && a.has_api_token);
   const tbody = document.getElementById('analyticsBody');
   setAnalyticsTotals({ income: 0, expense: 0, self: 0, balance: 0 });
 
