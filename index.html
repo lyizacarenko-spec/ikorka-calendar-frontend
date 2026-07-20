@@ -731,21 +731,18 @@ select.form-input { appearance:none; }
           <table class="analytics-table">
             <thead>
               <tr>
-                <th>ФОП</th><th>Прихід</th><th>Списання</th><th>Вивід на карту</th><th>Невизначені</th>
-                <th>Оборот по кредиту</th><th>Оборот по дебету</th><th>Вихідний залишок</th>
+                <th>ФОП</th><th>Кредит</th><th>Дебет</th><th>Вивід на карту</th><th>Вихідний залишок</th><th>Невизначені</th>
               </tr>
             </thead>
             <tbody id="analyticsBody"></tbody>
             <tfoot>
               <tr>
                 <td>Разом</td>
-                <td id="anTotalIncome">—</td>
-                <td id="anTotalExpense">—</td>
-                <td id="anTotalSelf">—</td>
-                <td id="anTotalUnknown">—</td>
                 <td id="anTotalCredit">—</td>
                 <td id="anTotalDebit">—</td>
+                <td id="anTotalSelf">—</td>
                 <td id="anTotalBalance">—</td>
+                <td id="anTotalUnknown">—</td>
               </tr>
             </tfoot>
           </table>
@@ -2309,14 +2306,12 @@ function balanceCellHTML(closing, diff) {
 function setAnalyticsTotals(t) {
   const credit = t.income;
   const debit = t.expense + t.self;
-  document.getElementById('anTotalIncome').textContent = `+₴ ${fmt(t.income)}`;
-  document.getElementById('anTotalExpense').textContent = `−₴ ${fmt(t.expense)}`;
-  document.getElementById('anTotalSelf').textContent = `₴ ${fmt(t.self)}`;
-  document.getElementById('anTotalUnknown').textContent = t.unknownCount ? `${t.unknownCount} · ₴ ${fmt(t.unknown)}` : '—';
   document.getElementById('anTotalCredit').textContent = `₴ ${fmt(credit)}`;
   document.getElementById('anTotalDebit').textContent = `₴ ${fmt(debit)}`;
+  document.getElementById('anTotalSelf').textContent = `₴ ${fmt(t.self)}`;
   const diff = t.openingMissing ? null : reconcileDiff(t.opening, credit, debit, t.balance);
   document.getElementById('anTotalBalance').innerHTML = balanceCellHTML(t.balance, diff);
+  document.getElementById('anTotalUnknown').textContent = t.unknownCount ? `${t.unknownCount} · ₴ ${fmt(t.unknown)}` : '—';
 }
 
 // Виписка по кожному ФОП займає ~30с на NovaPay, тому вантажимо рядки по черзі
@@ -2338,14 +2333,14 @@ async function loadAnalytics() {
   setAnalyticsTotals({ income: 0, expense: 0, self: 0, unknown: 0, unknownCount: 0, balance: 0, opening: 0, openingMissing: false });
 
   if (!novapayAccounts.length) {
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:20px">Немає ФОП з NovaPay</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:20px">Немає ФОП з NovaPay</td></tr>';
     return;
   }
 
   tbody.innerHTML = novapayAccounts.map(a => `
     <tr id="anRow-${a.id}">
       <td>${a.name}</td>
-      <td colspan="7" style="color:var(--muted);font-family:'Inter',sans-serif">
+      <td colspan="5" style="color:var(--muted);font-family:'Inter',sans-serif">
         <div class="spinner" style="width:14px;height:14px;display:inline-block;vertical-align:middle;margin-right:6px"></div>завантаження...
       </td>
     </tr>`).join('');
@@ -2363,7 +2358,7 @@ async function loadAnalytics() {
       if (signal.aborted) return;
 
       if (!r.ok || !data.success) {
-        if (row) row.innerHTML = `<td>${acc.name}</td><td colspan="7" style="color:var(--red);font-family:'Inter',sans-serif">${data.error || 'Помилка'}</td>`;
+        if (row) row.innerHTML = `<td>${acc.name}</td><td colspan="5" style="color:var(--red);font-family:'Inter',sans-serif">${data.error || 'Помилка'}</td>`;
         continue;
       }
 
@@ -2393,16 +2388,14 @@ async function loadAnalytics() {
 
       if (row) row.innerHTML = `
         <td>${acc.name}</td>
-        <td style="color:var(--green)">+₴ ${fmt(income)}</td>
-        <td style="color:var(--red)">−₴ ${fmt(expense)}</td>
-        <td style="color:var(--muted)">₴ ${fmt(self)}</td>
-        <td style="${unknownCount ? 'color:var(--amber)' : 'color:var(--muted)'}">${unknownCount ? `${unknownCount} · ₴ ${fmt(unknown)}` : '—'}</td>
         <td>₴ ${fmt(credit)}</td>
         <td>₴ ${fmt(debit)}</td>
-        <td>${balanceCellHTML(balance, diff)}</td>`;
+        <td style="color:var(--muted)">₴ ${fmt(self)}</td>
+        <td>${balanceCellHTML(balance, diff)}</td>
+        <td style="${unknownCount ? 'color:var(--amber)' : 'color:var(--muted)'}">${unknownCount ? `${unknownCount} · ₴ ${fmt(unknown)}` : '—'}</td>`;
     } catch(e) {
       if (e.name === 'AbortError') return;
-      if (row) row.innerHTML = `<td>${acc.name}</td><td colspan="7" style="color:var(--red);font-family:'Inter',sans-serif">Помилка з'єднання</td>`;
+      if (row) row.innerHTML = `<td>${acc.name}</td><td colspan="5" style="color:var(--red);font-family:'Inter',sans-serif">Помилка з'єднання</td>`;
     }
   }
 }
