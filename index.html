@@ -790,11 +790,11 @@ select.form-input { appearance:none; }
     <div class="form-row">
       <div class="form-group">
         <label class="form-label">З</label>
-        <input class="form-input" type="date" id="stFrom" onchange="loadStatement()">
+        <input class="form-input" type="date" id="stFrom" onchange="loadStatementDebounced()">
       </div>
       <div class="form-group">
         <label class="form-label">По</label>
-        <input class="form-input" type="date" id="stTo" onchange="loadStatement()">
+        <input class="form-input" type="date" id="stTo" onchange="loadStatementDebounced()">
       </div>
     </div>
     <div id="stBalance" style="font-size:14px;font-weight:700;font-family:'JetBrains Mono',monospace;margin:8px 0 14px"></div>
@@ -2103,6 +2103,8 @@ async function saveBalance() {
 }
 
 let statementAccountId = null;
+let statementDebounceTimer = null;
+let statementAbortController = null;
 
 function toISODate(d) { return d.toISOString().split('T')[0]; }
 
@@ -2125,8 +2127,23 @@ function setStatementPeriod(kind) {
   loadStatement();
 }
 
+// Викликається з полів дати: гасить дрібні проміжні зміни (день/місяць/рік вводяться
+// окремими change-подіями), щоб не бити запитами по одноразовому refresh_token NovaPay.
+function loadStatementDebounced() {
+  clearTimeout(statementDebounceTimer);
+  statementDebounceTimer = setTimeout(loadStatement, 600);
+}
+
 async function loadStatement() {
   if (!statementAccountId) return;
+  clearTimeout(statementDebounceTimer);
+
+  // Скасовуємо попередній незавершений запит — інакше стара відповідь може
+  // прилетіти пізніше і перезаписати результат новішого запиту.
+  if (statementAbortController) statementAbortController.abort();
+  statementAbortController = new AbortController();
+  const signal = statementAbortController.signal;
+
   const from = document.getElementById('stFrom').value;
   const to = document.getElementById('stTo').value;
   const listEl = document.getElementById('stList');
@@ -2134,7 +2151,8 @@ async function loadStatement() {
   listEl.innerHTML = '<div class="loader"><div class="spinner"></div> Завантаження...</div>';
   try {
     const r = await fetch(`${API}/api/novapay/extract/${statementAccountId}?from=${from}&to=${to}`, {
-      headers: { Authorization: 'Bearer ' + token }
+      headers: { Authorization: 'Bearer ' + token },
+      signal
     });
     const data = await r.json();
     if (!r.ok || !data.success) {
@@ -2160,6 +2178,7 @@ async function loadStatement() {
         </div>`;
     }).join('');
   } catch(e) {
+    if (e.name === 'AbortError') return; // замінено новішим запитом — нормально
     listEl.innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-title">Помилка з\'єднання</div></div>';
   }
 }
