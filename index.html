@@ -358,6 +358,19 @@ select.form-input { appearance:none; }
 .section-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:16px; }
 .section-title { font-size:18px; font-weight:700; }
 .section-sub { font-size:12px; color:var(--muted); margin-top:3px; }
+
+/* ANALYTICS TABLE */
+.analytics-table { width:100%; border-collapse:collapse; font-size:13px; min-width:640px; }
+.analytics-table th {
+  text-align:left; padding:8px 10px; color:var(--muted); font-weight:600;
+  font-size:11px; text-transform:uppercase; letter-spacing:.3px; border-bottom:1px solid var(--border);
+}
+.analytics-table td {
+  padding:10px; border-bottom:1px solid var(--border2);
+  font-family:'JetBrains Mono',monospace; white-space:nowrap;
+}
+.analytics-table td:first-child { font-family:'Inter',sans-serif; font-weight:600; white-space:normal; }
+.analytics-table tfoot td { font-weight:700; border-top:1px solid var(--border); border-bottom:none; }
 </style>
 </head>
 <body>
@@ -417,6 +430,7 @@ select.form-input { appearance:none; }
       <div class="nav-item" data-screen="cashcount"><span class="icon">💵</span> Купюрниця</div>
       <div class="nav-item" data-screen="currency"><span class="icon">💱</span> Валютний резерв</div>
      <div class="nav-item" data-screen="summary"><span class="icon">📋</span> Тижневий звіт</div>
+      <div class="nav-item" data-screen="analytics"><span class="icon">📈</span> Аналітика по ФОП</div>
       <div class="nav-group">Система</div>
       <div class="nav-item" data-screen="autopay"><span class="icon">🔁</span> Автоплатежі</div>
       <div class="nav-item" data-screen="users"><span class="icon">👥</span> Користувачі</div>
@@ -687,6 +701,49 @@ select.form-input { appearance:none; }
           </div>
         </div>
         <div id="summaryContent"><div class="loader"><div class="spinner"></div></div></div>
+      </div>
+    </div>
+
+    <!-- ANALYTICS SCREEN -->
+    <div class="screen" id="screen-analytics">
+      <div class="screen-body">
+        <div class="section-header">
+          <div>
+            <div class="section-title">Аналітика по ФОП</div>
+            <div class="section-sub" id="analyticsSub">—</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:12px">
+          <button class="btn btn-ghost btn-sm" onclick="setAnalyticsPeriod('week')">Тиждень</button>
+          <button class="btn btn-ghost btn-sm" onclick="setAnalyticsPeriod('month')">Місяць</button>
+        </div>
+        <div class="form-row" style="max-width:420px">
+          <div class="form-group">
+            <label class="form-label">З</label>
+            <input class="form-input" type="date" id="anFrom" onchange="loadAnalyticsDebounced()">
+          </div>
+          <div class="form-group">
+            <label class="form-label">По</label>
+            <input class="form-input" type="date" id="anTo" onchange="loadAnalyticsDebounced()">
+          </div>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="analytics-table">
+            <thead>
+              <tr><th>ФОП</th><th>Прихід</th><th>Списання</th><th>Перекази собі</th><th>Баланс</th></tr>
+            </thead>
+            <tbody id="analyticsBody"></tbody>
+            <tfoot>
+              <tr>
+                <td>Разом</td>
+                <td id="anTotalIncome">—</td>
+                <td id="anTotalExpense">—</td>
+                <td id="anTotalSelf">—</td>
+                <td id="anTotalBalance">—</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
       </div>
     </div>
 
@@ -1640,10 +1697,10 @@ function showScreen(name, el) {
   document.getElementById('screen-' + name).classList.add('active');
   if (el) el.classList.add('active');
   
-  const titles = { calendar:'Платіжний календар', cashflow:'Кеш-флоу', accounts:'Рахунки та ФОП', transfers:'Переводи', withdrawals:'Вивід власника', debts:'Борги', cashcount:'Купюрниця', currency:'Валютний резерв', summary:'Тижневий звіт', autopay:'Автоплатежі', users:'Користувачі' };
+  const titles = { calendar:'Платіжний календар', cashflow:'Кеш-флоу', accounts:'Рахунки та ФОП', transfers:'Переводи', withdrawals:'Вивід власника', debts:'Борги', cashcount:'Купюрниця', currency:'Валютний резерв', summary:'Тижневий звіт', analytics:'Аналітика по ФОП', autopay:'Автоплатежі', users:'Користувачі' };
   document.getElementById('topbarTitle').textContent = titles[name] || name;
-  
-  const hidePeriod = ['accounts','debts','cashcount','currency','summary','autopay','users','transfers'];
+
+  const hidePeriod = ['accounts','debts','cashcount','currency','summary','analytics','autopay','users','transfers'];
   document.getElementById('periodCtrl').style.display = hidePeriod.includes(name) ? 'none' : 'flex';
 
   if (name === 'accounts') loadAccounts();
@@ -1651,6 +1708,7 @@ function showScreen(name, el) {
   else if (name === 'cashcount') loadCashCount();
   else if (name === 'currency') loadCurrencyReserve();
   else if (name === 'summary') loadSummary();
+  else if (name === 'analytics') loadAnalyticsScreen();
   else if (name === 'autopay') loadAutopay();
   else if (name === 'withdrawals') loadWithdrawals();
   else if (name === 'transfers') loadTransfers();
@@ -2108,21 +2166,35 @@ let statementAbortController = null;
 
 function toISODate(d) { return d.toISOString().split('T')[0]; }
 
+// Понеділок/неділя календарного тижня, що містить дату d.
+function mondayOf(d) {
+  const day = d.getDay(); // 0=Нд,1=Пн,...,6=Сб
+  const diff = (day === 0 ? -6 : 1) - day;
+  const m = new Date(d);
+  m.setDate(d.getDate() + diff);
+  return m;
+}
+function sundayOf(d) {
+  const s = mondayOf(d);
+  s.setDate(s.getDate() + 6);
+  return s;
+}
+
 function openStatementModal(id, name) {
   statementAccountId = id;
   document.getElementById('statementSub').textContent = name;
   const today = new Date();
-  const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
-  document.getElementById('stTo').value = toISODate(today);
-  document.getElementById('stFrom').value = toISODate(weekAgo);
+  document.getElementById('stTo').value = toISODate(sundayOf(today));
+  document.getElementById('stFrom').value = toISODate(mondayOf(today));
   document.getElementById('statementModal').classList.add('show');
   loadStatement();
 }
 
 function setStatementPeriod(kind) {
   const today = new Date();
-  const from = kind === 'day' ? today : new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
-  document.getElementById('stTo').value = toISODate(today);
+  const from = kind === 'day' ? today : mondayOf(today);
+  const to = kind === 'day' ? today : sundayOf(today);
+  document.getElementById('stTo').value = toISODate(to);
   document.getElementById('stFrom').value = toISODate(from);
   loadStatement();
 }
@@ -2180,6 +2252,119 @@ async function loadStatement() {
   } catch(e) {
     if (e.name === 'AbortError') return; // замінено новішим запитом — нормально
     listEl.innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-title">Помилка з\'єднання</div></div>';
+  }
+}
+
+let analyticsDebounceTimer = null;
+let analyticsAbortController = null;
+
+function loadAnalyticsScreen() {
+  if (!document.getElementById('anFrom').value) {
+    setAnalyticsPeriod('week');
+  } else {
+    loadAnalytics();
+  }
+}
+
+function setAnalyticsPeriod(kind) {
+  const today = new Date();
+  let from, to;
+  if (kind === 'week') {
+    from = mondayOf(today); to = sundayOf(today);
+  } else {
+    from = new Date(today.getFullYear(), today.getMonth(), 1);
+    to = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+  }
+  document.getElementById('anFrom').value = toISODate(from);
+  document.getElementById('anTo').value = toISODate(to);
+  loadAnalytics();
+}
+
+function loadAnalyticsDebounced() {
+  clearTimeout(analyticsDebounceTimer);
+  analyticsDebounceTimer = setTimeout(loadAnalytics, 600);
+}
+
+function setAnalyticsTotals(t) {
+  document.getElementById('anTotalIncome').textContent = `+₴ ${fmt(t.income)}`;
+  document.getElementById('anTotalExpense').textContent = `−₴ ${fmt(t.expense)}`;
+  document.getElementById('anTotalSelf').textContent = `₴ ${fmt(t.self)}`;
+  document.getElementById('anTotalBalance').textContent = `₴ ${fmt(t.balance)}`;
+}
+
+// Виписка по кожному ФОП займає ~30с на NovaPay, тому вантажимо рядки по черзі
+// й одразу показуємо кожен готовий — паралельно екран висів би хвилину мовчки.
+async function loadAnalytics() {
+  clearTimeout(analyticsDebounceTimer);
+  if (analyticsAbortController) analyticsAbortController.abort();
+  const controller = new AbortController();
+  analyticsAbortController = controller;
+  const signal = controller.signal;
+
+  const from = document.getElementById('anFrom').value;
+  const to = document.getElementById('anTo').value;
+  if (!from || !to) return;
+  document.getElementById('analyticsSub').textContent = `${from} — ${to}`;
+
+  const novapayAccounts = accounts.filter(a => a.api_type === 'novapay');
+  const tbody = document.getElementById('analyticsBody');
+  setAnalyticsTotals({ income: 0, expense: 0, self: 0, balance: 0 });
+
+  if (!novapayAccounts.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px">Немає ФОП з NovaPay</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = novapayAccounts.map(a => `
+    <tr id="anRow-${a.id}">
+      <td>${a.name}</td>
+      <td colspan="4" style="color:var(--muted);font-family:'Inter',sans-serif">
+        <div class="spinner" style="width:14px;height:14px;display:inline-block;vertical-align:middle;margin-right:6px"></div>завантаження...
+      </td>
+    </tr>`).join('');
+
+  const totals = { income: 0, expense: 0, self: 0, balance: 0 };
+
+  for (const acc of novapayAccounts) {
+    if (signal.aborted) return;
+    const row = document.getElementById(`anRow-${acc.id}`);
+    try {
+      const r = await fetch(`${API}/api/novapay/extract/${acc.id}?from=${from}&to=${to}`, {
+        headers: { Authorization: 'Bearer ' + token }, signal
+      });
+      const data = await r.json();
+      if (signal.aborted) return;
+
+      if (!r.ok || !data.success) {
+        if (row) row.innerHTML = `<td>${acc.name}</td><td colspan="4" style="color:var(--red);font-family:'Inter',sans-serif">${data.error || 'Помилка'}</td>`;
+        continue;
+      }
+
+      let income = 0, expense = 0, self = 0;
+      for (const op of (data.operations || [])) {
+        const amt = Math.abs(op.amount || 0);
+        if (op.isSelfTransfer) self += amt;
+        else if (op.sign === '+') income += amt;
+        else if (op.sign === '-') expense += amt;
+      }
+      const balance = parseFloat(data.balance || 0);
+
+      totals.income += income;
+      totals.expense += expense;
+      totals.self += self;
+      totals.balance += balance;
+      setAnalyticsTotals(totals);
+
+      if (row) row.innerHTML = `
+        <td>${acc.name}</td>
+        <td style="color:var(--green)">+₴ ${fmt(income)}</td>
+        <td style="color:var(--red)">−₴ ${fmt(expense)}</td>
+        <td style="color:var(--muted)">₴ ${fmt(self)}</td>
+        <td>₴ ${fmt(balance)}</td>`;
+    } catch(e) {
+      if (e.name === 'AbortError') return;
+      if (row) row.innerHTML = `<td>${acc.name}</td><td colspan="4" style="color:var(--red);font-family:'Inter',sans-serif">Помилка з'єднання</td>`;
+    }
   }
 }
 
