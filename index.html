@@ -162,6 +162,7 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
 .leg-dot.plan { background:#d29922; }
 .leg-dot.paid { background:#3fb950; }
 .leg-dot.confirmed { background:#2ea043; border:1px solid #1a4020; }
+.leg-dot.entered { background:#58a6ff; }
 .leg-dot.noecon { background:#a371f7; }
 
 .cal-table { border-collapse:collapse; font-size:12px; }
@@ -206,6 +207,7 @@ td.col-art { z-index:5; background:var(--bg); }
 .s-plan .cell-inner { background:var(--amber-bg); color:#f0c040; border:1px solid var(--amber-border); }
 .s-paid .cell-inner { background:var(--green-bg); color:#3fb950; border:1px solid var(--green-border); }
 .s-confirmed .cell-inner { background:#0d2d0d; color:#2ea043; border:1px solid #1a4020; }
+.s-entered .cell-inner { background:var(--blue-bg); color:#58a6ff; border:1px solid var(--blue-border); }
 .s-empty .cell-inner { opacity:0; }
 
 .total-row td { background:var(--surface2); border:1px solid var(--border); padding:6px 8px; font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:700; }
@@ -339,6 +341,9 @@ select.form-input { appearance:none; }
 .pill.paid { background:var(--surface2); color:var(--muted); border-color:var(--border); }
 .pill.paid.active { background:var(--green-bg); color:var(--green); border-color:var(--green-border); }
 .pill.active { opacity:1; } .pill:not(.active) { opacity:0.5; }
+.pill.entered { background:var(--surface2); color:var(--muted); border-color:var(--border); }
+.pill.entered.active { background:var(--blue-bg); color:var(--blue); border-color:var(--blue-border); }
+.pill.entered.disabled { opacity:0.25; cursor:not-allowed; pointer-events:none; }
 .pill.cost-fc { background:var(--amber-bg); color:var(--amber); border-color:var(--amber-border); }
 .pill.cost-vc { background:var(--purple-bg); color:var(--purple); border-color:var(--purple); }
 
@@ -508,6 +513,7 @@ select.form-input { appearance:none; }
         <div class="leg-item"><div class="leg-dot plan"></div> Заплановано</div>
         <div class="leg-item"><div class="leg-dot paid"></div> Оплачено</div>
         <div class="leg-item"><div class="leg-dot confirmed"></div> В економіку</div>
+        <div class="leg-item"><div class="leg-dot entered"></div> Внесено</div>
         <div class="leg-item"><div class="leg-dot noecon"></div> Тільки кеш-флоу</div>
         <span style="margin-left:auto;font-size:11px;color:var(--dim)">Кліки на ячейку → додати платіж</span>
       </div>
@@ -858,10 +864,11 @@ select.form-input { appearance:none; }
     </div>
     <div class="form-group">
       <label class="form-label">Статус</label>
-      <div class="status-pills">
+      <div class="status-pills" id="statusPills">
         <div class="pill plan active" onclick="setStatus('planned')">⏳ Заплановано</div>
         <div class="pill paid" onclick="setStatus('paid')">✓ Оплачено</div>
       </div>
+      <div class="pill entered disabled" id="enteredToggle" onclick="toggleEntered()" style="margin-top:8px;display:inline-block">📥 Внесено</div>
     </div>
     <div class="form-group">
       <label class="form-label">Коментар</label>
@@ -1131,6 +1138,7 @@ let currentMonth = new Date().getMonth() + 1;
 let currentYear = new Date().getFullYear();
 let txType = 'expense';
 let txStatus = 'planned';
+let txEntered = false;
 let customCostType = null;
 let currencyOpType = 'buy';
 let accounts = [];
@@ -1352,7 +1360,7 @@ function renderCalendar(data) {
           html += `<td class="cell s-empty" onclick="cellClick(${cat.id || 0}, '${(cat.name||'').replace(/'/g,"\\'")}', ${d})"><div class="cell-inner"></div></td>`;
         } else {
           const op = dayOps[0];
-          const cls = op.status === 'confirmed' ? 's-confirmed' : op.status === 'paid' ? 's-paid' : 's-plan';
+          const cls = op.is_entered ? 's-entered' : op.status === 'confirmed' ? 's-confirmed' : op.status === 'paid' ? 's-paid' : 's-plan';
           const totalDay = dayOps.reduce((s, o) => s + parseFloat(o.amount), 0);
           html += `<td class="cell ${cls}" onclick="cellClick(${cat.id || 0}, '${(cat.name||'').replace(/'/g,"\\'")}', ${d})">
             <div class="cell-inner">${fmt(totalDay)}</div></td>`;
@@ -1804,11 +1812,11 @@ function showDayOps(catId, catName, day, ops) {
     <div style="display:flex;justify-content:space-between;align-items:center;padding:12px;background:var(--surface2);border-radius:8px;margin-bottom:8px">
       <div style="flex:1">
         <div style="font-size:15px;font-weight:700;font-family:'JetBrains Mono',monospace">₴ ${fmt(op.amount)}</div>
-        <div style="font-size:11px;color:${statusColor[op.status]||'var(--muted)'}">${statusLabel[op.status]||op.status}</div>
+        <div style="font-size:11px;color:${op.is_entered ? '#58a6ff' : (statusColor[op.status]||'var(--muted)')}">${op.is_entered ? '📥 Внесено' : (statusLabel[op.status]||op.status)}</div>
         <div style="font-size:11px;color:var(--muted)">${op.account || '—'}</div>
       </div>
       <div style="display:flex;gap:6px">
-        <button class="btn btn-ghost btn-sm" onclick="editOp(${op.id}, ${op.amount}, '${op.status}', ${op.account_id||'null'})">✏️</button>
+        <button class="btn btn-ghost btn-sm" onclick="editOp(${op.id}, ${op.amount}, '${op.status}', ${op.account_id||'null'}, ${!!op.is_entered})">✏️</button>
         <button class="btn btn-ghost btn-sm" onclick="deleteOp(${op.id})">🗑</button>
       </div>
     </div>`).join('');
@@ -1825,7 +1833,7 @@ function addMoreToDay() {
 
 let editingOpId = null;
 
-function editOp(id, amount, status, accountId) {
+function editOp(id, amount, status, accountId, isEntered) {
   closeModal('dayOpsModal');
   const catId = document.getElementById('dayOpsCat').value;
   const catName = document.getElementById('dayOpsCatName').value;
@@ -1836,6 +1844,7 @@ function editOp(id, amount, status, accountId) {
   document.getElementById('txAmount').value = amount;
   if (accountId) document.getElementById('txAccount').value = accountId;
   setStatus(status === 'planned' ? 'planned' : 'paid');
+  setEntered(isEntered);
   document.getElementById('addModal').querySelector('.modal-title').textContent = 'Редагувати платіж';
 }
 
@@ -1914,10 +1923,34 @@ function setTxType(type) {
 
 function setStatus(s) {
   txStatus = s;
-  document.querySelectorAll('#addModal .pill').forEach(p => p.classList.remove('active'));
+  // Скоуп на #statusPills, а не на весь #addModal — інакше зачепить і custom-cost пігулки
+  // (FC/VC), і "Внесено", які теж лежать всередині модалки.
+  document.querySelectorAll('#statusPills .pill').forEach(p => p.classList.remove('active'));
   const cls = s === 'paid' ? 'paid' : 'plan';
-  const el = document.querySelector(`#addModal .pill.${cls}`);
+  const el = document.querySelector(`#statusPills .pill.${cls}`);
   if (el) el.classList.add('active');
+  updateEnteredAvailability();
+}
+
+// "Внесено" доступне лише коли статус "Оплачено" — інакше перемикач заблокований,
+// а сама позначка скидається (не можна лишити "Внесено" на запланованому платежі).
+function updateEnteredAvailability() {
+  const el = document.getElementById('enteredToggle');
+  if (!el) return;
+  const enabled = txStatus === 'paid';
+  el.classList.toggle('disabled', !enabled);
+  if (!enabled) setEntered(false);
+}
+
+function toggleEntered() {
+  if (txStatus !== 'paid') return;
+  setEntered(!txEntered);
+}
+
+function setEntered(val) {
+  txEntered = !!val && txStatus === 'paid';
+  const el = document.getElementById('enteredToggle');
+  if (el) el.classList.toggle('active', txEntered);
 }
 
 async function saveTransaction() {
@@ -1940,26 +1973,25 @@ async function saveTransaction() {
   try {
     let r;
     if (editingOpId) {
-      // Редагування існуючої операції
+      // Редагування існуючої операції. Статус оновлюємо ПЕРШИМ — PUT перевіряє поточний
+      // статус у базі, щоб вирішити, чи можна лишити is_entered=true; якщо міняти статус
+      // на 'paid' і вмикати "Внесено" в один клік, PUT має побачити вже оновлений статус.
+      await fetch(`${API}/api/transactions/${editingOpId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({ status: txStatus })
+      });
       r = await fetch(`${API}/api/transactions/${editingOpId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-        body: JSON.stringify({ date, amount: parseFloat(amount), account_id: parseInt(account_id), category_id: (!isCustomCategory && category_id) ? parseInt(category_id) : null, new_category, note })
+        body: JSON.stringify({ date, amount: parseFloat(amount), account_id: parseInt(account_id), category_id: (!isCustomCategory && category_id) ? parseInt(category_id) : null, new_category, note, is_entered: txEntered })
       });
-      // Оновлюємо статус окремо
-      if (r.ok) {
-        await fetch(`${API}/api/transactions/${editingOpId}/status`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-          body: JSON.stringify({ status: txStatus })
-        });
-      }
     } else {
       // Створення нової
       r = await fetch(API + '/api/transactions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-        body: JSON.stringify({ type: txType, date, amount: parseFloat(amount), account_id: parseInt(account_id), category_id: (!isCustomCategory && category_id) ? parseInt(category_id) : null, new_category, note, status: txStatus })
+        body: JSON.stringify({ type: txType, date, amount: parseFloat(amount), account_id: parseInt(account_id), category_id: (!isCustomCategory && category_id) ? parseInt(category_id) : null, new_category, note, status: txStatus, is_entered: txEntered })
       });
     }
     if (r.ok) {
