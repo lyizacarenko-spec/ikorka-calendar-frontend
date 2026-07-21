@@ -341,6 +341,28 @@ select.form-input { appearance:none; }
 .pill.active { opacity:1; } .pill:not(.active) { opacity:0.5; }
 .pill.cost-fc { background:var(--amber-bg); color:var(--amber); border-color:var(--amber-border); }
 .pill.cost-vc { background:var(--purple-bg); color:var(--purple); border-color:var(--purple); }
+
+/* DATE PICKER — клік по полю відкриває сітку місяця; клік по числу ставить дату саме
+   в те поле, що редагується (без прив'язки до цілого тижня). */
+.dp-trigger { cursor:pointer; user-select:none; display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.dp-trigger .dp-icon { font-size:11px; opacity:.6; flex-shrink:0; }
+.dp-popover {
+  display:none; position:fixed; z-index:999;
+  background:var(--surface2); border:1px solid var(--border); border-radius:10px;
+  padding:10px; width:216px; box-shadow:0 8px 24px rgba(0,0,0,.45);
+}
+.dp-popover.show { display:block; }
+.dp-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; font-size:12px; font-weight:600; }
+.dp-nav { background:none; border:none; color:var(--muted); cursor:pointer; font-size:14px; padding:2px 8px; border-radius:4px; font-family:inherit; }
+.dp-nav:hover { background:var(--surface3); color:var(--text); }
+.dp-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:2px; }
+.dp-dow { font-size:9px; color:var(--muted); text-align:center; padding:3px 0; text-transform:uppercase; }
+.dp-day { font-size:11px; text-align:center; padding:5px 0; cursor:pointer; color:var(--text); border-radius:4px; }
+.dp-day.other-month { color:var(--dim); }
+.dp-day:hover { background:var(--surface3); }
+.dp-day.today { box-shadow:inset 0 0 0 1px var(--blue); }
+.dp-day.selected { background:var(--blue); color:#fff; font-weight:600; }
+
 .modal-actions { display:flex; gap:10px; margin-top:16px; }
 .modal-actions .btn { flex:1; padding:10px; font-size:13px; }
 .btn-cancel { background:var(--surface2); color:var(--muted); border:1px solid var(--border); }
@@ -728,11 +750,17 @@ select.form-input { appearance:none; }
         <div class="form-row" style="max-width:420px">
           <div class="form-group">
             <label class="form-label">З</label>
-            <input class="form-input" type="date" id="anFrom" onchange="loadAnalyticsDebounced()">
+            <div class="form-input dp-trigger" onclick="openDatePicker('anFrom', this, loadAnalytics)">
+              <span id="anFromText">—</span><span class="dp-icon">📅</span>
+            </div>
+            <input type="hidden" id="anFrom">
           </div>
           <div class="form-group">
             <label class="form-label">По</label>
-            <input class="form-input" type="date" id="anTo" onchange="loadAnalyticsDebounced()">
+            <div class="form-input dp-trigger" onclick="openDatePicker('anTo', this, loadAnalytics)">
+              <span id="anToText">—</span><span class="dp-icon">📅</span>
+            </div>
+            <input type="hidden" id="anTo">
           </div>
         </div>
         <div style="overflow-x:auto">
@@ -858,11 +886,17 @@ select.form-input { appearance:none; }
     <div class="form-row" style="max-width:420px">
       <div class="form-group">
         <label class="form-label">З</label>
-        <input class="form-input" type="date" id="stFrom" onchange="loadStatementDebounced()">
+        <div class="form-input dp-trigger" onclick="openDatePicker('stFrom', this, loadStatement)">
+          <span id="stFromText">—</span><span class="dp-icon">📅</span>
+        </div>
+        <input type="hidden" id="stFrom">
       </div>
       <div class="form-group">
         <label class="form-label">По</label>
-        <input class="form-input" type="date" id="stTo" onchange="loadStatementDebounced()">
+        <div class="form-input dp-trigger" onclick="openDatePicker('stTo', this, loadStatement)">
+          <span id="stToText">—</span><span class="dp-icon">📅</span>
+        </div>
+        <input type="hidden" id="stTo">
       </div>
     </div>
     <div id="stBalance" style="font-size:14px;font-weight:700;font-family:'JetBrains Mono',monospace;margin:8px 0 14px"></div>
@@ -1085,6 +1119,9 @@ select.form-input { appearance:none; }
 
 <!-- TOAST -->
 <div class="toast" id="toast"></div>
+
+<!-- DATE PICKER POPOVER (один спільний інстанс для всіх полів дат) -->
+<div class="dp-popover" id="dpPopover"></div>
 
 <script>
 const API = 'https://ikorka-calendar-production.up.railway.app';
@@ -2171,20 +2208,119 @@ async function saveBalance() {
   } catch(e) { showToast('Помилка з\'єднання', 'error'); }
 }
 
-// Дебаунс для полів дат (виписка, аналітика) — одна спільна реалізація замість
-// окремого таймера на кожен екран.
-function debounce(fn, ms) {
-  let timer;
-  return (...args) => {
-    clearTimeout(timer);
-    timer = setTimeout(() => fn(...args), ms);
-  };
+// ============ DATE PICKER (спільний для всіх полів дат) ============
+// Один попап на всю сторінку: openDatePicker вказує, яке поле редагується і що
+// викликати після вибору. Клік по числу ставить дату лише в це поле — без прив'язки
+// до тижня чи іншого поля (той варіант пробували, виявився незручним).
+let dpFieldId = null;
+let dpOnSelect = null;
+let dpViewDate = new Date();
+
+function updateFieldDisplay(fieldId) {
+  const textEl = document.getElementById(fieldId + 'Text');
+  if (!textEl) return;
+  const val = document.getElementById(fieldId).value;
+  if (!val) { textEl.textContent = '—'; return; }
+  const [y, m, d] = val.split('-');
+  textEl.textContent = `${d}.${m}.${y}`;
 }
+
+function openDatePicker(fieldId, triggerEl, onSelect) {
+  dpFieldId = fieldId;
+  dpOnSelect = onSelect;
+  const current = document.getElementById(fieldId).value;
+  // new Date("YYYY-MM-DD") парсить як UTC-північ — у від'ємних відносно UTC поясах це
+  // зсуває дату на день назад. Розбираємо вручну, щоб лишитись у локальному часі.
+  if (current) {
+    const [y, m, d] = current.split('-').map(Number);
+    dpViewDate = new Date(y, m - 1, d);
+  } else {
+    dpViewDate = new Date();
+  }
+  renderDatePicker();
+
+  const pop = document.getElementById('dpPopover');
+  const rect = triggerEl.getBoundingClientRect();
+  pop.style.left = Math.round(rect.left) + 'px';
+  pop.style.top = Math.round(rect.bottom + 6) + 'px';
+  pop.classList.add('show');
+}
+
+function closeDatePicker() {
+  const pop = document.getElementById('dpPopover');
+  if (pop) pop.classList.remove('show');
+  dpFieldId = null;
+  dpOnSelect = null;
+}
+
+function navDatePicker(dir) {
+  dpViewDate = new Date(dpViewDate.getFullYear(), dpViewDate.getMonth() + dir, 1);
+  renderDatePicker();
+}
+
+function renderDatePicker() {
+  const pop = document.getElementById('dpPopover');
+  const y = dpViewDate.getFullYear();
+  const m = dpViewDate.getMonth();
+  const monthNames = ['Січень','Лютий','Березень','Квітень','Травень','Червень','Липень','Серпень','Вересень','Жовтень','Листопад','Грудень'];
+  const firstOfMonth = new Date(y, m, 1);
+  const startOffset = (firstOfMonth.getDay() + 6) % 7; // 0=Пн
+  const daysInMonth = new Date(y, m + 1, 0).getDate();
+  const daysInPrevMonth = new Date(y, m, 0).getDate();
+
+  const selectedVal = dpFieldId ? document.getElementById(dpFieldId).value : '';
+  const todayISO = toISODate(new Date());
+
+  const totalCells = Math.ceil((startOffset + daysInMonth) / 7) * 7;
+  let cellsHTML = '';
+  for (let i = 0; i < totalCells; i++) {
+    const dayNum = i - startOffset + 1;
+    let cellDate, otherMonth = false;
+    if (dayNum < 1) { cellDate = new Date(y, m - 1, daysInPrevMonth + dayNum); otherMonth = true; }
+    else if (dayNum > daysInMonth) { cellDate = new Date(y, m + 1, dayNum - daysInMonth); otherMonth = true; }
+    else { cellDate = new Date(y, m, dayNum); }
+    const iso = toISODate(cellDate);
+    const isSelected = iso === selectedVal;
+    const isToday = iso === todayISO;
+    cellsHTML += `<div class="dp-day ${otherMonth ? 'other-month' : ''} ${isSelected ? 'selected' : ''} ${isToday ? 'today' : ''}"
+      onclick="pickDate('${iso}')">${cellDate.getDate()}</div>`;
+  }
+
+  pop.innerHTML = `
+    <div class="dp-head">
+      <button type="button" class="dp-nav" onclick="navDatePicker(-1)">‹</button>
+      <span>${monthNames[m]} ${y}</span>
+      <button type="button" class="dp-nav" onclick="navDatePicker(1)">›</button>
+    </div>
+    <div class="dp-grid">
+      ${['Пн','Вт','Ср','Чт','Пт','Сб','Нд'].map(d => `<div class="dp-dow">${d}</div>`).join('')}
+      ${cellsHTML}
+    </div>`;
+}
+
+function pickDate(iso) {
+  if (!dpFieldId) return;
+  document.getElementById(dpFieldId).value = iso;
+  updateFieldDisplay(dpFieldId);
+  const cb = dpOnSelect;
+  closeDatePicker();
+  if (cb) cb();
+}
+
+document.addEventListener('click', (e) => {
+  const pop = document.getElementById('dpPopover');
+  if (!pop || !pop.classList.contains('show')) return;
+  if (!pop.contains(e.target) && !e.target.closest('.dp-trigger')) closeDatePicker();
+});
 
 let statementAccountId = null;
 let statementAbortController = null;
 
-function toISODate(d) { return d.toISOString().split('T')[0]; }
+// НЕ через toISOString()/UTC — для локально-опівнічних дат (new Date(y,m,d)) це в
+// позитивних часових поясах (Україна, UTC+2/+3) відкочує дату на день назад.
+function toISODate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
 // Понеділок/неділя календарного тижня, що містить дату d.
 function mondayOf(d) {
@@ -2206,6 +2342,8 @@ function openStatementModal(id, name) {
   const today = new Date();
   document.getElementById('stTo').value = toISODate(sundayOf(today));
   document.getElementById('stFrom').value = toISODate(mondayOf(today));
+  updateFieldDisplay('stFrom');
+  updateFieldDisplay('stTo');
   document.getElementById('statementModal').classList.add('show');
   loadStatement();
 }
@@ -2216,10 +2354,10 @@ function setStatementPeriod(kind) {
   const to = kind === 'day' ? today : sundayOf(today);
   document.getElementById('stTo').value = toISODate(to);
   document.getElementById('stFrom').value = toISODate(from);
+  updateFieldDisplay('stFrom');
+  updateFieldDisplay('stTo');
   loadStatement();
 }
-
-const loadStatementDebounced = debounce(() => loadStatement(), 600);
 
 async function loadStatement() {
   if (!statementAccountId) return;
@@ -2290,10 +2428,10 @@ function setAnalyticsPeriod(kind) {
   }
   document.getElementById('anFrom').value = toISODate(from);
   document.getElementById('anTo').value = toISODate(to);
+  updateFieldDisplay('anFrom');
+  updateFieldDisplay('anTo');
   loadAnalytics();
 }
-
-const loadAnalyticsDebounced = debounce(() => loadAnalytics(), 600);
 
 // Різниця "очікуваний − фактичний" вихідний залишок, або null якщо перевірити нема з чого
 // (вхідний залишок не прийшов у виписці). Опис: Вхідний + Кредит − Дебет має дати Вихідний.
