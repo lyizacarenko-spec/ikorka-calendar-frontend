@@ -346,6 +346,8 @@ select.form-input { appearance:none; }
 .pill.entered.disabled { opacity:0.25; cursor:not-allowed; pointer-events:none; }
 .pill.filter { background:var(--surface2); color:var(--muted); border-color:var(--border); }
 .pill.filter.active { background:var(--blue-bg); color:var(--blue); border-color:var(--blue-border); }
+.pill.toggle { background:var(--surface2); color:var(--muted); border-color:var(--border); }
+.pill.toggle.active { background:var(--green-bg); color:var(--green); border-color:var(--green-border); }
 .pill.cost-fc { background:var(--amber-bg); color:var(--amber); border-color:var(--amber-border); }
 .pill.cost-vc { background:var(--purple-bg); color:var(--purple); border-color:var(--purple); }
 
@@ -470,6 +472,7 @@ select.form-input { appearance:none; }
       <div class="nav-item" data-screen="analytics"><span class="icon">📈</span> Аналітика по ФОП</div>
       <div class="nav-group">Система</div>
       <div class="nav-item" data-screen="autopay"><span class="icon">🔁</span> Автоплатежі</div>
+      <div class="nav-item" id="navExpCats" data-screen="expcats" style="display:none"><span class="icon">🏷️</span> Статті витрат</div>
       <div class="nav-item" data-screen="users"><span class="icon">👥</span> Користувачі</div>
     </div>
     <div class="sidebar-user">
@@ -813,6 +816,28 @@ select.form-input { appearance:none; }
       </div>
     </div>
 
+    <!-- EXPENSE CATEGORIES SCREEN -->
+    <div class="screen" id="screen-expcats">
+      <div class="screen-body">
+        <div class="section-header">
+          <div>
+            <div class="section-title">Статті витрат</div>
+            <div class="section-sub" id="expCatsSub">Довідник статей</div>
+          </div>
+          <button class="btn btn-primary" onclick="openExpCatModal()">+ Додати статтю</button>
+        </div>
+        <div id="expCatList"><div class="loader"><div class="spinner"></div></div></div>
+
+        <div class="section-header" style="margin-top:24px;cursor:pointer" onclick="toggleInactiveCats()">
+          <div>
+            <div class="section-title" style="font-size:14px" id="expCatInactiveTitle">Деактивовані</div>
+          </div>
+          <span id="expCatInactiveArrow">▸</span>
+        </div>
+        <div id="expCatInactiveList" style="display:none"></div>
+      </div>
+    </div>
+
     <!-- USERS SCREEN -->
     <div class="screen" id="screen-users">
       <div class="screen-body">
@@ -1003,6 +1028,39 @@ select.form-input { appearance:none; }
     <div class="modal-actions">
       <button class="btn btn-cancel" onclick="closeModal('balanceModal')">Скасувати</button>
       <button class="btn btn-primary" onclick="saveBalance()">Зберегти</button>
+    </div>
+  </div>
+</div>
+
+<!-- EXPENSE CATEGORY MODAL -->
+<div class="modal-overlay" id="expCatModal">
+  <div class="modal">
+    <div class="modal-title" id="expCatModalTitle">Додати статтю</div>
+    <input type="hidden" id="expCatEditId">
+    <div class="form-group">
+      <label class="form-label">Назва</label>
+      <input class="form-input" type="text" id="expCatName" placeholder="Напр. Оренда офісу">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Група</label>
+      <select class="form-input" id="expCatGroupSelect" onchange="toggleExpCatNewGroup()"></select>
+      <input class="form-input" type="text" id="expCatNewGroup" placeholder="Назва нової групи" style="display:none;margin-top:8px">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Тип витрат</label>
+      <div class="status-pills" id="expCatCostPills">
+        <div class="pill cost-fc" id="expCatCostFC" onclick="setExpCatCostType('FC')">FC — постійна</div>
+        <div class="pill cost-vc" id="expCatCostVC" onclick="setExpCatCostType('VC')">VC — змінна</div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Економіка</label>
+      <div class="pill toggle active" id="expCatEconomyToggle" onclick="setExpCatEconomy(!expCatEconomy)">Входить в економіку</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">Якщо вимкнено — стаття йде тільки в кеш-флоу (напр. заводи)</div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-cancel" onclick="closeModal('expCatModal')">Скасувати</button>
+      <button class="btn btn-primary" onclick="saveExpCat()">Зберегти</button>
     </div>
   </div>
 </div>
@@ -1208,6 +1266,9 @@ async function initApp() {
   
   // Hide add button for viewers
   if (currentUser.role === 'viewer') document.getElementById('addBtn').style.display = 'none';
+
+  // "Статті витрат" — керування довідником, тільки admin
+  if (currentUser.role === 'admin') document.getElementById('navExpCats').style.display = '';
 
   // Nav clicks
   document.querySelectorAll('.nav-item[data-screen]').forEach(el => {
@@ -1783,6 +1844,174 @@ async function loadAutopay() {
   } catch(e) { console.error(e); }
 }
 
+// ============ EXPENSE CATEGORIES (admin) ============
+let expCatData = [];
+let expCatCostType = null;
+let expCatEconomy = true;
+
+async function loadExpCats() {
+  try {
+    const r = await fetch(`${API}/api/categories?all=true`, { headers: { Authorization: 'Bearer ' + token } });
+    if (!r.ok) {
+      document.getElementById('expCatList').innerHTML = '<div class="empty-state"><div class="empty-icon">🔒</div><div class="empty-title">Немає доступу</div></div>';
+      return;
+    }
+    const data = await r.json();
+    expCatData = data.flat || [];
+    renderExpCatLists();
+  } catch(e) { console.error(e); }
+}
+
+function expCatRowHTML(c, active) {
+  const badges = `
+    ${c.cost_type ? `<span class="art-badge ${c.cost_type.toLowerCase()}">${c.cost_type}</span>` : ''}
+    ${c.is_economy === false ? '<span class="art-badge noecon">КФ</span>' : ''}`;
+  const actions = active
+    ? `<button class="btn btn-ghost btn-sm" onclick="openExpCatModal(${c.id})">✏️</button>
+       <button class="btn btn-ghost btn-sm" onclick="deactivateExpCat(${c.id}, '${(c.name||'').replace(/'/g,"\\'")}', ${c.transaction_count})">🗑</button>`
+    : `<button class="btn btn-ghost btn-sm" onclick="restoreExpCat(${c.id})">↩️ Відновити</button>`;
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:var(--surface2);border-radius:8px;margin-bottom:6px">
+      <div>
+        <div style="font-size:13px">${c.name}${badges}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">${c.group_name || 'Без групи'}${c.transaction_count ? ` · ${c.transaction_count} платежів` : ''}</div>
+      </div>
+      <div style="display:flex;gap:6px">${actions}</div>
+    </div>`;
+}
+
+function renderExpCatLists() {
+  const active = expCatData.filter(c => c.is_active);
+  const inactive = expCatData.filter(c => !c.is_active);
+
+  if (active.length === 0) {
+    document.getElementById('expCatList').innerHTML = '<div class="empty-state"><div class="empty-icon">🏷️</div><div class="empty-title">Немає активних статей</div></div>';
+  } else {
+    const grouped = {};
+    active.forEach(c => {
+      const g = c.group_name || 'Без групи';
+      (grouped[g] || (grouped[g] = [])).push(c);
+    });
+    document.getElementById('expCatList').innerHTML = Object.entries(grouped).map(([group, items]) => `
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin:14px 0 6px">${group}</div>
+      ${items.map(c => expCatRowHTML(c, true)).join('')}
+    `).join('');
+  }
+
+  document.getElementById('expCatInactiveTitle').textContent = `Деактивовані (${inactive.length})`;
+  document.getElementById('expCatInactiveList').innerHTML = inactive.length === 0
+    ? '<div style="font-size:12px;color:var(--muted);padding:8px 0">Немає деактивованих статей</div>'
+    : inactive.map(c => expCatRowHTML(c, false)).join('');
+}
+
+function toggleInactiveCats() {
+  const list = document.getElementById('expCatInactiveList');
+  const arrow = document.getElementById('expCatInactiveArrow');
+  const show = list.style.display === 'none';
+  list.style.display = show ? 'block' : 'none';
+  arrow.textContent = show ? '▾' : '▸';
+}
+
+function populateExpCatGroupSelect(selected) {
+  const groups = [...new Set(expCatData.map(c => c.group_name).filter(Boolean))].sort();
+  const sel = document.getElementById('expCatGroupSelect');
+  sel.innerHTML = groups.map(g => `<option value="${g}">${g}</option>`).join('') + `<option value="__new__">+ Нова група...</option>`;
+  if (selected && groups.includes(selected)) {
+    sel.value = selected;
+  } else if (selected) {
+    sel.value = '__new__';
+    document.getElementById('expCatNewGroup').style.display = 'block';
+    document.getElementById('expCatNewGroup').value = selected;
+  } else {
+    sel.value = groups[0] || '__new__';
+    toggleExpCatNewGroup();
+  }
+}
+
+function toggleExpCatNewGroup() {
+  const isNew = document.getElementById('expCatGroupSelect').value === '__new__';
+  document.getElementById('expCatNewGroup').style.display = isNew ? 'block' : 'none';
+}
+
+function setExpCatCostType(t) {
+  expCatCostType = expCatCostType === t ? null : t;
+  document.getElementById('expCatCostFC').classList.toggle('active', expCatCostType === 'FC');
+  document.getElementById('expCatCostVC').classList.toggle('active', expCatCostType === 'VC');
+}
+
+function setExpCatEconomy(v) {
+  expCatEconomy = v;
+  document.getElementById('expCatEconomyToggle').classList.toggle('active', expCatEconomy);
+}
+
+// openExpCatModal() — нова стаття; openExpCatModal(id) — редагування наявної.
+function openExpCatModal(id) {
+  const cat = id ? expCatData.find(c => c.id === id) : null;
+  document.getElementById('expCatModalTitle').textContent = cat ? 'Редагувати статтю' : 'Додати статтю';
+  document.getElementById('expCatEditId').value = cat ? cat.id : '';
+  document.getElementById('expCatName').value = cat ? cat.name : '';
+  populateExpCatGroupSelect(cat ? cat.group_name : null);
+  setExpCatCostType(null);
+  if (cat && cat.cost_type) setExpCatCostType(cat.cost_type);
+  setExpCatEconomy(cat ? cat.is_economy !== false : true);
+  document.getElementById('expCatModal').classList.add('show');
+}
+
+async function saveExpCat() {
+  const editId = document.getElementById('expCatEditId').value;
+  const name = document.getElementById('expCatName').value.trim();
+  const groupSel = document.getElementById('expCatGroupSelect').value;
+  const group_name = groupSel === '__new__' ? document.getElementById('expCatNewGroup').value.trim() : groupSel;
+  if (!name) { showToast('Вкажи назву статті', 'error'); return; }
+  if (!group_name) { showToast('Вкажи групу', 'error'); return; }
+
+  try {
+    const r = await fetch(`${API}/api/categories${editId ? '/' + editId : ''}`, {
+      method: editId ? 'PUT' : 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({ name, group_name, cost_type: expCatCostType, is_economy: expCatEconomy })
+    });
+    if (r.ok) {
+      closeModal('expCatModal');
+      showToast('Збережено ✓', 'success');
+      loadExpCats();
+      loadMeta();
+    } else {
+      const err = await r.json();
+      showToast(err.error || 'Помилка', 'error');
+    }
+  } catch(e) { showToast('Помилка з\'єднання', 'error'); }
+}
+
+async function deactivateExpCat(id, name, count) {
+  // 0 транзакцій — деактивуємо одразу без зайвих питань, як і просили.
+  if (count > 0) {
+    const msg = `Статтю "${name}" використано в ${count} платежах. Вона зникне зі списку вибору, але наявні платежі залишаться. Деактивувати?`;
+    if (!confirm(msg)) return;
+  }
+  try {
+    const r = await fetch(`${API}/api/categories/${id}/active`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({ is_active: false })
+    });
+    if (r.ok) { showToast('Статтю деактивовано ✓', 'success'); loadExpCats(); loadMeta(); }
+    else showToast('Помилка', 'error');
+  } catch(e) { showToast('Помилка з\'єднання', 'error'); }
+}
+
+async function restoreExpCat(id) {
+  try {
+    const r = await fetch(`${API}/api/categories/${id}/active`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({ is_active: true })
+    });
+    if (r.ok) { showToast('Статтю відновлено ✓', 'success'); loadExpCats(); loadMeta(); }
+    else showToast('Помилка', 'error');
+  } catch(e) { showToast('Помилка з\'єднання', 'error'); }
+}
+
 // ============ ACTIONS ============
 function showScreen(name, el) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
@@ -1790,10 +2019,10 @@ function showScreen(name, el) {
   document.getElementById('screen-' + name).classList.add('active');
   if (el) el.classList.add('active');
   
-  const titles = { calendar:'Платіжний календар', cashflow:'Кеш-флоу', accounts:'Рахунки та ФОП', transfers:'Переводи', withdrawals:'Вивід власника', debts:'Борги', cashcount:'Купюрниця', currency:'Валютний резерв', summary:'Тижневий звіт', analytics:'Аналітика по ФОП', autopay:'Автоплатежі', users:'Користувачі' };
+  const titles = { calendar:'Платіжний календар', cashflow:'Кеш-флоу', accounts:'Рахунки та ФОП', transfers:'Переводи', withdrawals:'Вивід власника', debts:'Борги', cashcount:'Купюрниця', currency:'Валютний резерв', summary:'Тижневий звіт', analytics:'Аналітика по ФОП', autopay:'Автоплатежі', expcats:'Статті витрат', users:'Користувачі' };
   document.getElementById('topbarTitle').textContent = titles[name] || name;
 
-  const hidePeriod = ['accounts','debts','cashcount','currency','summary','analytics','autopay','users','transfers'];
+  const hidePeriod = ['accounts','debts','cashcount','currency','summary','analytics','autopay','expcats','users','transfers'];
   document.getElementById('periodCtrl').style.display = hidePeriod.includes(name) ? 'none' : 'flex';
 
   if (name === 'accounts') loadAccounts();
@@ -1803,6 +2032,7 @@ function showScreen(name, el) {
   else if (name === 'summary') loadSummary();
   else if (name === 'analytics') loadAnalyticsScreen();
   else if (name === 'autopay') loadAutopay();
+  else if (name === 'expcats') loadExpCats();
   else if (name === 'withdrawals') loadWithdrawals();
   else if (name === 'transfers') loadTransfers();
   else if (name === 'cashflow') loadCashflow();
