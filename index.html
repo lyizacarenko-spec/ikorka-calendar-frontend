@@ -341,29 +341,6 @@ select.form-input { appearance:none; }
 .pill.active { opacity:1; } .pill:not(.active) { opacity:0.5; }
 .pill.cost-fc { background:var(--amber-bg); color:var(--amber); border-color:var(--amber-border); }
 .pill.cost-vc { background:var(--purple-bg); color:var(--purple); border-color:var(--purple); }
-
-/* WEEK CALENDAR POPOVER — компактний вибір тижня замість двох date-полів */
-.date-range-picker { position:relative; max-width:190px; }
-.date-range-trigger { cursor:pointer; user-select:none; display:flex; align-items:center; justify-content:space-between; gap:8px; }
-.date-range-trigger .icon { font-size:11px; opacity:.6; flex-shrink:0; }
-.week-cal-popover {
-  display:none; position:absolute; top:calc(100% + 6px); left:0; z-index:50;
-  background:var(--surface2); border:1px solid var(--border); border-radius:10px;
-  padding:10px; width:216px; box-shadow:0 8px 24px rgba(0,0,0,.45);
-}
-.week-cal-popover.show { display:block; }
-.week-cal-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; font-size:12px; font-weight:600; }
-.week-cal-nav { background:none; border:none; color:var(--muted); cursor:pointer; font-size:14px; padding:2px 8px; border-radius:4px; font-family:inherit; }
-.week-cal-nav:hover { background:var(--surface3); color:var(--text); }
-.week-cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:2px; }
-.week-cal-dow { font-size:9px; color:var(--muted); text-align:center; padding:3px 0; text-transform:uppercase; }
-.week-cal-day { font-size:11px; text-align:center; padding:5px 0; cursor:pointer; color:var(--text); border-radius:4px; }
-.week-cal-day.other-month { color:var(--dim); }
-.week-cal-day:hover { background:var(--surface3); }
-.week-cal-day.today { box-shadow:inset 0 0 0 1px var(--blue); }
-.week-cal-day.in-week { background:var(--blue-bg); color:var(--blue); border-radius:0; }
-.week-cal-day.in-week:hover { background:var(--blue-border); }
-
 .modal-actions { display:flex; gap:10px; margin-top:16px; }
 .modal-actions .btn { flex:1; padding:10px; font-size:13px; }
 .btn-cancel { background:var(--surface2); color:var(--muted); border:1px solid var(--border); }
@@ -878,14 +855,15 @@ select.form-input { appearance:none; }
       <button class="btn btn-ghost btn-sm" onclick="setStatementPeriod('day')">День</button>
       <button class="btn btn-ghost btn-sm" onclick="setStatementPeriod('week')">Тиждень</button>
     </div>
-    <div class="form-group date-range-picker" id="stDateRangeWrap">
-      <label class="form-label">Період</label>
-      <div class="form-input date-range-trigger" id="stRangeDisplay" onclick="toggleStatementCal(event)">
-        <span id="stRangeText">—</span><span class="icon">📅</span>
+    <div class="form-row" style="max-width:420px">
+      <div class="form-group">
+        <label class="form-label">З</label>
+        <input class="form-input" type="date" id="stFrom" onchange="loadStatementDebounced()">
       </div>
-      <input type="hidden" id="stFrom">
-      <input type="hidden" id="stTo">
-      <div class="week-cal-popover" id="stCalPopover"></div>
+      <div class="form-group">
+        <label class="form-label">По</label>
+        <input class="form-input" type="date" id="stTo" onchange="loadStatementDebounced()">
+      </div>
     </div>
     <div id="stBalance" style="font-size:14px;font-weight:700;font-family:'JetBrains Mono',monospace;margin:8px 0 14px"></div>
     <div id="stList" style="max-height:400px;overflow-y:auto"></div>
@@ -2193,9 +2171,18 @@ async function saveBalance() {
   } catch(e) { showToast('Помилка з\'єднання', 'error'); }
 }
 
+// Дебаунс для полів дат (виписка, аналітика) — одна спільна реалізація замість
+// окремого таймера на кожен екран.
+function debounce(fn, ms) {
+  let timer;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), ms);
+  };
+}
+
 let statementAccountId = null;
 let statementAbortController = null;
-let stCalViewDate = new Date();
 
 function toISODate(d) { return d.toISOString().split('T')[0]; }
 
@@ -2219,8 +2206,6 @@ function openStatementModal(id, name) {
   const today = new Date();
   document.getElementById('stTo').value = toISODate(sundayOf(today));
   document.getElementById('stFrom').value = toISODate(mondayOf(today));
-  updateStRangeDisplay();
-  closeStatementCal();
   document.getElementById('statementModal').classList.add('show');
   loadStatement();
 }
@@ -2231,100 +2216,10 @@ function setStatementPeriod(kind) {
   const to = kind === 'day' ? today : sundayOf(today);
   document.getElementById('stTo').value = toISODate(to);
   document.getElementById('stFrom').value = toISODate(from);
-  updateStRangeDisplay();
-  closeStatementCal();
   loadStatement();
 }
 
-// Компактний текст замість двох date-полів, напр. "13.07 – 19.07.2026".
-function updateStRangeDisplay() {
-  const from = document.getElementById('stFrom').value;
-  const to = document.getElementById('stTo').value;
-  const el = document.getElementById('stRangeText');
-  if (!from || !to) { el.textContent = '—'; return; }
-  const [fy, fm, fd] = from.split('-');
-  const [ty, tm, td] = to.split('-');
-  el.textContent = `${fd}.${fm} – ${td}.${tm}.${ty}`;
-}
-
-function toggleStatementCal(e) {
-  e.stopPropagation();
-  const pop = document.getElementById('stCalPopover');
-  const willShow = !pop.classList.contains('show');
-  if (willShow) {
-    const from = document.getElementById('stFrom').value;
-    stCalViewDate = from ? new Date(from) : new Date();
-    renderStatementCal();
-  }
-  pop.classList.toggle('show', willShow);
-}
-
-function closeStatementCal() {
-  const pop = document.getElementById('stCalPopover');
-  if (pop) pop.classList.remove('show');
-}
-
-function navStatementCal(dir) {
-  stCalViewDate = new Date(stCalViewDate.getFullYear(), stCalViewDate.getMonth() + dir, 1);
-  renderStatementCal();
-}
-
-// Малює сітку місяця в попапі; дні обраного тижня (за поточними stFrom/stTo) підсвічені.
-function renderStatementCal() {
-  const pop = document.getElementById('stCalPopover');
-  const y = stCalViewDate.getFullYear();
-  const m = stCalViewDate.getMonth();
-  const monthNames = ['Січень','Лютий','Березень','Квітень','Травень','Червень','Липень','Серпень','Вересень','Жовтень','Листопад','Грудень'];
-  const firstOfMonth = new Date(y, m, 1);
-  const startOffset = (firstOfMonth.getDay() + 6) % 7; // 0=Пн
-  const daysInMonth = new Date(y, m + 1, 0).getDate();
-  const daysInPrevMonth = new Date(y, m, 0).getDate();
-
-  const fromVal = document.getElementById('stFrom').value;
-  const toVal = document.getElementById('stTo').value;
-  const todayISO = toISODate(new Date());
-
-  const totalCells = Math.ceil((startOffset + daysInMonth) / 7) * 7;
-  let cellsHTML = '';
-  for (let i = 0; i < totalCells; i++) {
-    const dayNum = i - startOffset + 1;
-    let cellDate, otherMonth = false;
-    if (dayNum < 1) { cellDate = new Date(y, m - 1, daysInPrevMonth + dayNum); otherMonth = true; }
-    else if (dayNum > daysInMonth) { cellDate = new Date(y, m + 1, dayNum - daysInMonth); otherMonth = true; }
-    else { cellDate = new Date(y, m, dayNum); }
-    const iso = toISODate(cellDate);
-    const inWeek = fromVal && toVal && iso >= fromVal && iso <= toVal;
-    const isToday = iso === todayISO;
-    cellsHTML += `<div class="week-cal-day ${otherMonth ? 'other-month' : ''} ${inWeek ? 'in-week' : ''} ${isToday ? 'today' : ''}"
-      onclick="selectStatementWeek('${iso}')">${cellDate.getDate()}</div>`;
-  }
-
-  pop.innerHTML = `
-    <div class="week-cal-head">
-      <button type="button" class="week-cal-nav" onclick="navStatementCal(-1)">‹</button>
-      <span>${monthNames[m]} ${y}</span>
-      <button type="button" class="week-cal-nav" onclick="navStatementCal(1)">›</button>
-    </div>
-    <div class="week-cal-grid">
-      ${['Пн','Вт','Ср','Чт','Пт','Сб','Нд'].map(d => `<div class="week-cal-dow">${d}</div>`).join('')}
-      ${cellsHTML}
-    </div>`;
-}
-
-function selectStatementWeek(iso) {
-  const [y, m, d] = iso.split('-').map(Number);
-  const clicked = new Date(y, m - 1, d);
-  document.getElementById('stFrom').value = toISODate(mondayOf(clicked));
-  document.getElementById('stTo').value = toISODate(sundayOf(clicked));
-  updateStRangeDisplay();
-  closeStatementCal();
-  loadStatement();
-}
-
-document.addEventListener('click', (e) => {
-  const wrap = document.getElementById('stDateRangeWrap');
-  if (wrap && !wrap.contains(e.target)) closeStatementCal();
-});
+const loadStatementDebounced = debounce(() => loadStatement(), 600);
 
 async function loadStatement() {
   if (!statementAccountId) return;
@@ -2374,7 +2269,6 @@ async function loadStatement() {
   }
 }
 
-let analyticsDebounceTimer = null;
 let analyticsAbortController = null;
 
 function loadAnalyticsScreen() {
@@ -2399,10 +2293,7 @@ function setAnalyticsPeriod(kind) {
   loadAnalytics();
 }
 
-function loadAnalyticsDebounced() {
-  clearTimeout(analyticsDebounceTimer);
-  analyticsDebounceTimer = setTimeout(loadAnalytics, 600);
-}
+const loadAnalyticsDebounced = debounce(() => loadAnalytics(), 600);
 
 // Різниця "очікуваний − фактичний" вихідний залишок, або null якщо перевірити нема з чого
 // (вхідний залишок не прийшов у виписці). Опис: Вхідний + Кредит − Дебет має дати Вихідний.
@@ -2433,7 +2324,6 @@ function setAnalyticsTotals(t) {
 // Виписка по кожному ФОП займає ~30с на NovaPay, тому вантажимо рядки по черзі
 // й одразу показуємо кожен готовий — паралельно екран висів би хвилину мовчки.
 async function loadAnalytics() {
-  clearTimeout(analyticsDebounceTimer);
   if (analyticsAbortController) analyticsAbortController.abort();
   const controller = new AbortController();
   analyticsAbortController = controller;
