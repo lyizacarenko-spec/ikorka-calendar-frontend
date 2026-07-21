@@ -344,6 +344,8 @@ select.form-input { appearance:none; }
 .pill.entered { background:var(--surface2); color:var(--muted); border-color:var(--border); }
 .pill.entered.active { background:var(--blue-bg); color:var(--blue); border-color:var(--blue-border); }
 .pill.entered.disabled { opacity:0.25; cursor:not-allowed; pointer-events:none; }
+.pill.filter { background:var(--surface2); color:var(--muted); border-color:var(--border); }
+.pill.filter.active { background:var(--blue-bg); color:var(--blue); border-color:var(--blue-border); }
 .pill.cost-fc { background:var(--amber-bg); color:var(--amber); border-color:var(--amber-border); }
 .pill.cost-vc { background:var(--purple-bg); color:var(--purple); border-color:var(--purple); }
 
@@ -515,6 +517,11 @@ select.form-input { appearance:none; }
         <div class="leg-item"><div class="leg-dot confirmed"></div> В економіку</div>
         <div class="leg-item"><div class="leg-dot entered"></div> Внесено</div>
         <div class="leg-item"><div class="leg-dot noecon"></div> Тільки кеш-флоу</div>
+        <div class="status-pills" id="enteredFilterGroup" style="margin-left:16px">
+          <div class="pill filter active" data-filter="all" onclick="setEnteredFilter('all')">Всі</div>
+          <div class="pill filter" data-filter="not_entered" onclick="setEnteredFilter('not_entered')">Не внесені</div>
+          <div class="pill filter" data-filter="entered" onclick="setEnteredFilter('entered')">Внесені</div>
+        </div>
         <span style="margin-left:auto;font-size:11px;color:var(--dim)">Кліки на ячейку → додати платіж</span>
       </div>
       <div class="cal-container">
@@ -1143,6 +1150,7 @@ let customCostType = null;
 let currencyOpType = 'buy';
 let accounts = [];
 let calData = [];
+let enteredFilter = 'all'; // 'all' | 'not_entered' | 'entered'
 let categories = [];
 let selectedCell = null;
 
@@ -1310,13 +1318,32 @@ async function loadCalendar() {
   }
 }
 
+// Фільтр "Внесено" над календарем: не чіпає дані, лише що показувати. cellClick далі
+// працює з повним calData, тож клік по відфільтрованій клітинці все одно відкриє реальний
+// список операцій дня — фільтр тільки приховує/перефарбовує відображення.
+function opMatchesEnteredFilter(op) {
+  if (enteredFilter === 'entered') return !!op.is_entered;
+  if (enteredFilter === 'not_entered') return !op.is_entered;
+  return true;
+}
+
+function categoryHasVisibleOps(item) {
+  return Object.values(item.days || {}).some(ops => ops.some(opMatchesEnteredFilter));
+}
+
+function setEnteredFilter(val) {
+  enteredFilter = val;
+  document.querySelectorAll('#enteredFilterGroup .pill').forEach(p => p.classList.toggle('active', p.dataset.filter === val));
+  renderCalendar(calData);
+}
+
 function renderCalendar(data) {
   calData = data;
   const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
   const today = new Date();
   let html = '<table class="cal-table"><thead><tr>';
   html += `<th class="col-art">Стаття</th><th class="col-note">Тип</th><th class="col-sum">Сума міс.</th>`;
-  
+
   for (let d = 1; d <= daysInMonth; d++) {
     const date = new Date(currentYear, currentMonth - 1, d);
     const dow = date.getDay();
@@ -1336,14 +1363,21 @@ function renderCalendar(data) {
     grouped[g].push(item);
   });
 
-  Object.entries(grouped).forEach(([group, items]) => {
+  let renderedRows = 0;
+  Object.entries(grouped).forEach(([group, allItems]) => {
+    // Коли фільтр активний — ховаємо статті й цілі групи, де немає жодної операції, що
+    // йому відповідає (щоб не залишати порожні рядки під заголовком групи).
+    const items = enteredFilter === 'all' ? allItems : allItems.filter(categoryHasVisibleOps);
+    if (items.length === 0) return;
+    renderedRows += items.length;
+
     html += `<tr class="cat-row"><td colspan="${daysInMonth + 3}">${group}</td></tr>`;
     items.forEach(item => {
       const cat = item.category || {};
       const isNoecon = !cat.is_economy;
       let monthTotal = 0;
-      Object.values(item.days || {}).forEach(ops => ops.forEach(o => monthTotal += parseFloat(o.amount)));
-      
+      Object.values(item.days || {}).forEach(ops => ops.filter(opMatchesEnteredFilter).forEach(o => monthTotal += parseFloat(o.amount)));
+
       html += `<tr class="data-row">
         <td class="art-cell col-art">
           <div class="art-name">${cat.name || '—'}
@@ -1353,9 +1387,9 @@ function renderCalendar(data) {
         </td>
         <td class="art-cell" style="font-size:10px;color:var(--muted)">${cat.cost_type || '—'}</td>
         <td class="sum-cell">${monthTotal > 0 ? fmt(monthTotal) : '—'}</td>`;
-      
+
       for (let d = 1; d <= daysInMonth; d++) {
-        const dayOps = item.days?.[d] || [];
+        const dayOps = (item.days?.[d] || []).filter(opMatchesEnteredFilter);
         if (dayOps.length === 0) {
           html += `<td class="cell s-empty" onclick="cellClick(${cat.id || 0}, '${(cat.name||'').replace(/'/g,"\\'")}', ${d})"><div class="cell-inner"></div></td>`;
         } else {
@@ -1374,6 +1408,9 @@ function renderCalendar(data) {
   if (data.length === 0) {
     html += `<tr><td colspan="${daysInMonth + 3}" style="padding:40px;text-align:center;color:var(--muted)">
       Немає операцій за цей місяць. Натисни "+ Додати" щоб почати.</td></tr>`;
+  } else if (renderedRows === 0) {
+    const msg = enteredFilter === 'entered' ? 'Немає внесених платежів за цей місяць.' : 'Усі оплачені платежі за цей місяць уже внесені.';
+    html += `<tr><td colspan="${daysInMonth + 3}" style="padding:40px;text-align:center;color:var(--muted)">${msg}</td></tr>`;
   }
 
   html += '</tbody></table>';
