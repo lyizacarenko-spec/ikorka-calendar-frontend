@@ -241,6 +241,32 @@ td.col-art { z-index:5; background:var(--bg); }
 .up-date { font-size:10px; color:var(--muted); }
 .up-sum { font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:600; color:var(--red); }
 
+/* BANK OPERATIONS RIBBON */
+.bank-ribbon { width:320px; border-left:1px solid var(--border); background:var(--surface); display:flex; flex-direction:column; flex-shrink:0; }
+.bank-ribbon-header { padding:12px 14px; border-bottom:1px solid var(--border); flex-shrink:0; }
+.bank-ribbon-list { flex:1; overflow-y:auto; padding:4px 0; }
+.bank-op-item { padding:10px 14px; border-bottom:1px solid var(--border2); }
+.bank-op-item.processed { opacity:0.55; }
+.bank-op-item.self-transfer { background:var(--purple-bg); }
+.bank-op-top { display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
+.bank-op-date { font-size:11px; color:var(--muted); }
+.bank-op-amount { font-family:'JetBrains Mono',monospace; font-size:13px; font-weight:700; }
+.bank-op-amount.pos { color:var(--green); }
+.bank-op-amount.neg { color:var(--red); }
+.bank-op-tag { display:inline-block; margin-top:4px; font-size:10px; font-weight:700; color:var(--purple); background:var(--purple-bg); border:1px solid var(--purple); border-radius:4px; padding:1px 6px; }
+.bank-op-counterparty { font-size:12px; font-weight:600; margin-top:4px; }
+.bank-op-purpose { font-size:11px; color:var(--muted); margin-top:2px; line-height:1.3; }
+.bank-op-cat-select { margin-top:8px; font-size:12px; padding:6px 8px; }
+.bank-op-processed { margin-top:8px; font-size:12px; color:var(--green); font-weight:600; }
+.empty-state-sm { padding:20px 14px; font-size:12px; color:var(--muted); text-align:center; }
+@media (max-width: 1300px) {
+  .bank-ribbon { width:260px; }
+  .side-panel { width:220px; }
+}
+@media (max-width: 1100px) {
+  .side-panel { display:none; }
+}
+
 /* CASHFLOW SCREEN */
 .stats-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:20px; }
 .stat-card { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:14px; }
@@ -530,6 +556,20 @@ select.form-input { appearance:none; }
       <div class="cal-container">
         <div class="cal-wrap" id="calWrap">
           <div class="loader"><div class="spinner"></div> Завантаження календаря...</div>
+        </div>
+        <div class="bank-ribbon" id="bankRibbon">
+          <div class="bank-ribbon-header">
+            <div class="panel-title">Банківські операції</div>
+            <select class="form-input" id="bankRibbonAccount" onchange="loadBankOperations()" style="font-size:12px;padding:6px 8px">
+              <option value="">Оберіть рахунок...</option>
+            </select>
+            <div class="status-pills" style="margin-top:8px">
+              <div class="pill filter active" id="bankRibbonUnprocOnly" onclick="toggleBankRibbonFilter()">Тільки необроблені</div>
+            </div>
+          </div>
+          <div class="bank-ribbon-list" id="bankRibbonList">
+            <div class="empty-state-sm">Оберіть рахунок з банківською інтеграцією</div>
+          </div>
         </div>
         <div class="side-panel" id="sidePanel">
           <div class="panel-sec" id="gapAlert" style="display:none"></div>
@@ -1210,6 +1250,9 @@ let accounts = [];
 let calData = [];
 let enteredFilter = 'all'; // 'all' | 'not_entered' | 'entered'
 let categories = [];
+let bankRibbonAccountId = null;
+let bankRibbonUnprocessedOnly = true;
+let bankOps = [];
 let selectedCell = null;
 
 // ============ PIN ============
@@ -1316,6 +1359,8 @@ async function loadMeta() {
       catSel.innerHTML += `<option value="${c.id}">${c.name}${c.cost_type ? ' ['+c.cost_type+']' : ''}</option>`;
     });
     catSel.innerHTML += `<option value="__custom__">+ Своя стаття...</option>`;
+
+    populateBankRibbonAccounts();
   } catch(e) { console.error('loadMeta', e); }
 }
 
@@ -1376,6 +1421,133 @@ async function loadCalendar() {
     renderCalendar(data);
   } catch(e) {
     wrap.innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-title">Помилка завантаження</div></div>';
+  }
+}
+
+// ============ СТРІЧКА БАНКІВСЬКИХ ОПЕРАЦІЙ ============
+// Панель праворуч від календаря — сирі операції з bank_operations (заповнюються
+// автосинхронізацією на бекенді). Бухгалтер обирає статтю → POST /process
+// створює платіж 'paid' і позначає операцію обробленою (лишається у стрічці, тьмяна).
+function populateBankRibbonAccounts() {
+  const sel = document.getElementById('bankRibbonAccount');
+  if (!sel) return;
+  const bankAccounts = accounts.filter(a => (a.api_type === 'novapay' || a.api_type === 'privat') && a.has_api_token);
+  const prevValue = sel.value;
+  sel.innerHTML = '<option value="">Оберіть рахунок...</option>' +
+    bankAccounts.map(a => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('');
+  if (bankAccounts.some(a => String(a.id) === prevValue)) {
+    sel.value = prevValue;
+  } else if (bankAccounts.length && !bankRibbonAccountId) {
+    sel.value = bankAccounts[0].id;
+    loadBankOperations();
+  }
+}
+
+function toggleBankRibbonFilter() {
+  bankRibbonUnprocessedOnly = !bankRibbonUnprocessedOnly;
+  document.getElementById('bankRibbonUnprocOnly').classList.toggle('active', bankRibbonUnprocessedOnly);
+  loadBankOperations();
+}
+
+async function loadBankOperations() {
+  const sel = document.getElementById('bankRibbonAccount');
+  const list = document.getElementById('bankRibbonList');
+  bankRibbonAccountId = sel.value || null;
+  if (!bankRibbonAccountId) {
+    list.innerHTML = '<div class="empty-state-sm">Оберіть рахунок з банківською інтеграцією</div>';
+    return;
+  }
+  list.innerHTML = '<div class="loader"><div class="spinner"></div></div>';
+  try {
+    const params = new URLSearchParams({ account_id: bankRibbonAccountId });
+    if (bankRibbonUnprocessedOnly) params.set('unprocessed', 'true');
+    const r = await fetch(`${API}/api/bank-operations?${params}`, { headers: { Authorization: 'Bearer ' + token } });
+    bankOps = await r.json();
+    renderBankOperations();
+  } catch (e) {
+    list.innerHTML = '<div class="empty-state-sm">Помилка завантаження</div>';
+  }
+}
+
+function bankCategoryOptionsHtml(selectedId) {
+  let html = '';
+  let currentGroup = '';
+  categories.forEach(c => {
+    if (c.group_name !== currentGroup) {
+      if (currentGroup) html += '</optgroup>';
+      currentGroup = c.group_name;
+      html += `<optgroup label="${escapeHtml(currentGroup || '')}">`;
+    }
+    html += `<option value="${c.id}" ${String(c.id) === String(selectedId) ? 'selected' : ''}>${escapeHtml(c.name)}</option>`;
+  });
+  if (currentGroup) html += '</optgroup>';
+  return html;
+}
+
+function renderBankOperations() {
+  const list = document.getElementById('bankRibbonList');
+  if (!bankOps.length) {
+    list.innerHTML = '<div class="empty-state-sm">Немає операцій за обраним фільтром</div>';
+    return;
+  }
+  list.innerHTML = bankOps.map(bankOpRowHtml).join('');
+}
+
+function bankOpRowHtml(op) {
+  const isProcessed = !!op.processed_at;
+  const isPos = op.sign === '+';
+  const amtClass = isPos ? 'pos' : (op.sign === '-' ? 'neg' : '');
+  const signChar = isPos ? '+' : (op.sign === '-' ? '−' : '');
+  return `
+    <div class="bank-op-item ${isProcessed ? 'processed' : ''} ${op.is_self_transfer ? 'self-transfer' : ''}">
+      <div class="bank-op-top">
+        <span class="bank-op-date">${fmtDate(op.op_date)}</span>
+        <span class="bank-op-amount ${amtClass}">${signChar}₴ ${fmt(op.amount)}</span>
+      </div>
+      ${op.is_self_transfer ? '<div class="bank-op-tag">Переказ собі</div>' : ''}
+      <div class="bank-op-counterparty">${escapeHtml(op.counterparty || '—')}</div>
+      ${op.purpose ? `<div class="bank-op-purpose">${escapeHtml(op.purpose)}</div>` : ''}
+      ${isProcessed
+        ? `<div class="bank-op-processed">✓ ${escapeHtml(op.category_name || 'Рознесено')}</div>`
+        : `<select class="form-input bank-op-cat-select" onchange="processBankOp(${op.id}, this.value, this)">
+             <option value="">Обрати статтю...</option>
+             ${bankCategoryOptionsHtml(null)}
+           </select>`
+      }
+    </div>`;
+}
+
+async function processBankOp(opId, categoryId, selectEl) {
+  if (!categoryId) return;
+  if (selectEl) selectEl.disabled = true;
+  try {
+    const r = await fetch(`${API}/api/bank-operations/${opId}/process`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({ category_id: categoryId })
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      showToast(data.error || 'Помилка', 'error');
+      if (selectEl) selectEl.disabled = false;
+      return;
+    }
+    showToast('Платіж створено ✓', 'success');
+    const op = bankOps.find(o => o.id === opId);
+    if (op) {
+      op.processed_at = new Date().toISOString();
+      op.category_id = categoryId;
+      op.category_name = categories.find(c => String(c.id) === String(categoryId))?.name || '';
+    }
+    if (bankRibbonUnprocessedOnly) {
+      bankOps = bankOps.filter(o => o.id !== opId);
+    }
+    renderBankOperations();
+    loadCalendar();
+    loadBalances();
+  } catch (e) {
+    showToast('Помилка мережі', 'error');
+    if (selectEl) selectEl.disabled = false;
   }
 }
 
@@ -2965,6 +3137,9 @@ function fmtShort(n) {
 function fmtDate(d) {
   if (!d) return '—';
   return new Date(d).toLocaleDateString('uk-UA', { day:'numeric', month:'short', year:'numeric' });
+}
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, m => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[m]));
 }
 
 // Auto-login if token exists
