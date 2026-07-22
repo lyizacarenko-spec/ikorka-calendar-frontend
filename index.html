@@ -286,6 +286,15 @@ td.col-art { z-index:5; background:var(--bg); }
 .cf-total-row { display:flex; justify-content:space-between; align-items:center; padding-top:12px; margin-top:6px; border-top:1px solid var(--border); }
 .cf-total-lbl { font-size:14px; font-weight:700; }
 .cf-total-val { font-family:'JetBrains Mono',monospace; font-size:20px; font-weight:700; color:var(--green); }
+.cf-detail-group { border-bottom:1px solid var(--border2); }
+.cf-detail-group:last-child { border:none; }
+.cf-detail-group-row { display:flex; justify-content:space-between; align-items:center; padding:9px 0; cursor:pointer; }
+.cf-detail-group-row:hover { color:var(--text); }
+.cf-detail-group-name { font-size:13px; font-weight:700; }
+.cf-detail-group-sum { display:flex; align-items:center; gap:10px; }
+.cf-detail-pct { font-size:11px; color:var(--muted); font-family:'JetBrains Mono',monospace; }
+.cf-detail-items { padding:0 0 6px 18px; }
+.cf-detail-item { padding:5px 0; font-size:12px; }
 
 /* ACCOUNTS SCREEN */
 .accounts-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:14px; }
@@ -1694,12 +1703,17 @@ async function loadUpcoming() {
   }
 }
 
+let cfDetailGroups = [];
+let cfExpandedGroups = new Set(); // індекси розгорнутих груп у поточному renderCashflow-циклі
+
 async function loadCashflow() {
   try {
     const r = await fetch(`${API}/api/cashflow?month=${currentMonth}&year=${currentYear}`, {
       headers: { Authorization: 'Bearer ' + token }
     });
     const data = await r.json();
+    cfDetailGroups = data.expenses?.detail || [];
+    cfExpandedGroups = new Set(); // за замовчуванням всі групи згорнуті при кожному завантаженні
     
     // Mini cashflow in sidebar
     const cfMini = document.getElementById('cfMini');
@@ -1738,6 +1752,10 @@ async function loadCashflow() {
         <div class="cf-total-row"><span class="cf-total-lbl">Всього витрати</span><span class="cf-total-val" style="color:var(--red)">−₴ ${fmt(data.expenses?.total || 0)}</span></div>
       </div>
       <div class="big-card">
+        <div class="big-card-title">Деталізація витрат</div>
+        <div id="cfExpenseDetail"></div>
+      </div>
+      <div class="big-card">
         <div class="big-card-title">По тижнях</div>
         ${(data.weekly || []).length === 0
           ? '<div style="color:var(--muted);font-size:13px">Немає даних</div>'
@@ -1772,7 +1790,41 @@ async function loadCashflow() {
           <div class="cf-row"><span class="cf-lbl">${o.owner}</span><span class="cf-val neg">−₴ ${fmt(o.total)}</span></div>`).join('') || '<div style="color:var(--muted);font-size:13px">Немає виводів</div>'}
         <div class="cf-total-row"><span class="cf-total-lbl">Всього вивід</span><span class="cf-total-val" style="color:var(--red)">−₴ ${fmt(data.owner_withdrawals?.total || 0)}</span></div>
       </div>`;
+
+    renderExpenseDetail();
   } catch(e) { console.error('loadCashflow', e); }
+}
+
+function toggleCfGroup(i) {
+  if (cfExpandedGroups.has(i)) cfExpandedGroups.delete(i); else cfExpandedGroups.add(i);
+  renderExpenseDetail();
+}
+
+function renderExpenseDetail() {
+  const el = document.getElementById('cfExpenseDetail');
+  if (!el) return;
+  if (!cfDetailGroups.length) {
+    el.innerHTML = '<div style="color:var(--muted);font-size:13px">Немає витрат за період</div>';
+    return;
+  }
+  el.innerHTML = cfDetailGroups.map((g, i) => {
+    const expanded = cfExpandedGroups.has(i);
+    return `
+      <div class="cf-detail-group">
+        <div class="cf-detail-group-row" onclick="toggleCfGroup(${i})">
+          <span class="cf-detail-group-name">${expanded ? '▾' : '▸'} ${escapeHtml(g.group_name)}</span>
+          <span class="cf-detail-group-sum">
+            <span class="cf-detail-pct">${g.percent.toFixed(1).replace('.', ',')}%</span>
+            <span class="cf-val neg">−₴ ${fmt(g.total)}</span>
+          </span>
+        </div>
+        ${expanded ? `
+          <div class="cf-detail-items">
+            ${g.items.map(it => `
+              <div class="cf-row cf-detail-item"><span class="cf-lbl">${escapeHtml(it.category_name)}</span><span class="cf-val neg">−₴ ${fmt(it.total)}</span></div>`).join('')}
+          </div>` : ''}
+      </div>`;
+  }).join('');
 }
 
 async function loadDebts() {
