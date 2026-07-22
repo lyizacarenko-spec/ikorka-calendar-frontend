@@ -1462,7 +1462,11 @@ async function loadBankOperations() {
     const params = new URLSearchParams({ account_id: bankRibbonAccountId });
     if (bankRibbonUnprocessedOnly) params.set('unprocessed', 'true');
     const r = await fetch(`${API}/api/bank-operations?${params}`, { headers: { Authorization: 'Bearer ' + token } });
-    bankOps = await r.json();
+    const allOps = await r.json();
+    // Бухгалтеру в цій стрічці цікаві лише списання (витрати) — прихід сюди не показуємо.
+    // Перекази собі теж '-', але лишаємо їх (з окремою підсвіткою) — це вивід на карту,
+    // не витрата, бухгалтер сама вирішує, чи рознести.
+    bankOps = allOps.filter(op => op.sign === '-');
     renderBankOperations();
   } catch (e) {
     list.innerHTML = '<div class="empty-state-sm">Помилка завантаження</div>';
