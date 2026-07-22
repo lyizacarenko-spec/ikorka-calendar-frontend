@@ -1440,7 +1440,9 @@ async function loadCalendar() {
 function populateBankRibbonAccounts() {
   const sel = document.getElementById('bankRibbonAccount');
   if (!sel) return;
-  const bankAccounts = accounts.filter(a => (a.api_type === 'novapay' || a.api_type === 'privat') && a.has_api_token);
+  // Лише рахунки, що вже хоча б раз успішно синхронізувались (has_synced), а не просто
+  // мають вписаний токен — так само, як і в аналітиці по ФОП.
+  const bankAccounts = accounts.filter(a => (a.api_type === 'novapay' || a.api_type === 'privat') && a.has_synced);
   const prevValue = sel.value;
   sel.innerHTML = '<option value="">Оберіть рахунок...</option>' +
     bankAccounts.map(a => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('');
