@@ -2999,7 +2999,9 @@ async function loadAnalytics() {
   if (!from || !to) return;
   document.getElementById('analyticsSub').textContent = `${from} — ${to}`;
 
-  const bankAccounts = accounts.filter(a => (a.api_type === 'novapay' || a.api_type === 'privat') && a.has_api_token);
+  // Лише рахунки, які вже хоча б раз успішно синхронізувались (has_synced), а не просто
+  // мають вписаний токен — інакше ФОП з токеном, але без жодного sync, показуються порожніми.
+  const bankAccounts = accounts.filter(a => (a.api_type === 'novapay' || a.api_type === 'privat') && a.has_synced);
   const tbody = document.getElementById('analyticsBody');
   setAnalyticsTotals({ income: 0, expense: 0, self: 0, unknown: 0, unknownCount: 0, balance: 0, opening: 0, openingMissing: false });
 
