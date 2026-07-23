@@ -922,6 +922,8 @@ select.form-input { appearance:none; }
     </div>
     <div class="form-group">
       <label class="form-label">Стаття витрат</label>
+      <input class="form-input" type="text" id="txCategorySearch" placeholder="Пошук статті..."
+        autocomplete="off" oninput="filterCategoryOptions()" style="margin-bottom:6px">
       <select class="form-input" id="txCategory" onchange="toggleCustomCategory()">
         <option value="">Оберіть статтю...</option>
       </select>
@@ -1365,16 +1367,30 @@ async function loadMeta() {
     });
     
     const catSel = document.getElementById('txCategory');
-    catSel.innerHTML = '<option value="">Оберіть статтю...</option>';
+    // ВАЖЛИВО: збираємо весь HTML в один рядок і присвоюємо catSel.innerHTML ОДИН РАЗ
+    // в кінці. Послідовні catSel.innerHTML += '...' (як було раніше) щоразу серіалізують
+    // поточний DOM назад у рядок і перепарсюють його — а серіалізатор завжди дописує
+    // закриваючі теги, тож ще не дописаний <optgroup> "закривався" сам на наступному ж
+    // += ще до того, як у нього встигали додати опції. Результат — усі option опинялись
+    // сестрами на верхньому рівні, а <optgroup> лишались порожніми (групування було
+    // суто візуальним недоліком верстки, реально в DOM його не було). Одне-єдине
+    // присвоєння innerHTML парситься правильно з першого разу.
     let currentGroup = '';
+    let groupOpen = false;
+    let catHtml = '<option value="">Оберіть статтю...</option>';
     categories.forEach(c => {
       if (c.group_name !== currentGroup) {
+        if (groupOpen) catHtml += '</optgroup>';
         currentGroup = c.group_name;
-        catSel.innerHTML += `<optgroup label="${currentGroup}">`;
+        catHtml += `<optgroup label="${currentGroup}">`;
+        groupOpen = true;
       }
-      catSel.innerHTML += `<option value="${c.id}">${c.name}${c.cost_type ? ' ['+c.cost_type+']' : ''}</option>`;
+      catHtml += `<option value="${c.id}">${c.name}${c.cost_type ? ' ['+c.cost_type+']' : ''}</option>`;
     });
-    catSel.innerHTML += `<option value="__custom__">+ Своя стаття...</option>`;
+    if (groupOpen) catHtml += '</optgroup>';
+    catHtml += `<option value="__custom__">+ Своя стаття...</option>`;
+    catSel.innerHTML = catHtml;
+    filterCategoryOptions();
 
     populateBankRibbonAccounts();
   } catch(e) { console.error('loadMeta', e); }
@@ -2387,6 +2403,8 @@ function openCellModal(catId, catName, day) {
   customCostType = null;
   document.querySelectorAll('#customCostPills .pill').forEach(p => p.classList.remove('active'));
   document.getElementById('customCategoryBlock').style.display = 'none';
+  document.getElementById('txCategorySearch').value = '';
+  filterCategoryOptions();
   document.getElementById('addModal').classList.add('show');
 }
 
@@ -2405,12 +2423,37 @@ function openAddModal() {
   customCostType = null;
   document.querySelectorAll('#customCostPills .pill').forEach(p => p.classList.remove('active'));
   document.getElementById('customCategoryBlock').style.display = 'none';
+  document.getElementById('txCategorySearch').value = '';
+  filterCategoryOptions();
   document.getElementById('addModal').classList.add('show');
 }
 
 function toggleCustomCategory() {
   const isCustom = document.getElementById('txCategory').value === '__custom__';
   document.getElementById('customCategoryBlock').style.display = isCustom ? 'block' : 'none';
+}
+
+// Клієнтський пошук по статтях у #txCategory: ховає (hidden, не видаляє) опції, що не
+// збігаються за підрядком, і цілі optgroup, якщо в них не лишилось видимих статей.
+// Порядок опцій у DOM не міняється (sort_order з бекенду лишається як є) — тільки
+// показ/приховування. Плейсхолдер "" і "+ Своя стаття" завжди лишаються видимими.
+function filterCategoryOptions() {
+  const query = document.getElementById('txCategorySearch').value.trim().toLowerCase();
+  const sel = document.getElementById('txCategory');
+  Array.from(sel.children).forEach(node => {
+    if (node.tagName === 'OPTGROUP') {
+      let groupHasMatch = false;
+      Array.from(node.children).forEach(opt => {
+        const match = !query || opt.textContent.toLowerCase().includes(query);
+        opt.hidden = !match;
+        if (match) groupHasMatch = true;
+      });
+      node.hidden = !groupHasMatch;
+    } else if (node.tagName === 'OPTION' && node.value !== '' && node.value !== '__custom__') {
+      const match = !query || node.textContent.toLowerCase().includes(query);
+      node.hidden = !match;
+    }
+  });
 }
 
 function setCustomCostType(t) {
