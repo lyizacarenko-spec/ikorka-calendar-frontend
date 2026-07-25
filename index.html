@@ -223,7 +223,12 @@ td.col-sum { z-index:5; background:var(--bg); }
 .total-day { text-align:center; font-size:10px; color:var(--red); }
 
 /* SIDE PANEL */
-.side-panel { width:260px; border-left:1px solid var(--border); background:var(--surface); overflow-y:auto; flex-shrink:0; }
+.side-panel { width:260px; border-left:1px solid var(--border); background:var(--surface); overflow-y:auto; flex-shrink:0; transition:width .2s ease; }
+/* Ручне згортання обох правих панелей однією кнопкою (calPanelsToggle) — окремо від
+   медіа-запиту нижче (<1100px ховає side-panel завжди); тут керуємо шириною через клас,
+   щоб можна було плавно анімувати, а <1100px і так вимикає side-panel через display:none
+   незалежно від цього класу. */
+.bank-ribbon.panel-collapsed, .side-panel.panel-collapsed { width:0!important; min-width:0!important; border-left-color:transparent; overflow:hidden; }
 .panel-sec { border-bottom:1px solid var(--border); padding:12px 14px; }
 .panel-title { font-size:10px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:10px; }
 .gap-alert { background:var(--red-bg); border:1px solid var(--red-border); border-radius:6px; padding:8px 10px; display:flex; gap:8px; }
@@ -249,7 +254,7 @@ td.col-sum { z-index:5; background:var(--bg); }
 .up-sum { font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:600; color:var(--red); }
 
 /* BANK OPERATIONS RIBBON */
-.bank-ribbon { width:320px; border-left:1px solid var(--border); background:var(--surface); display:flex; flex-direction:column; flex-shrink:0; }
+.bank-ribbon { width:320px; border-left:1px solid var(--border); background:var(--surface); display:flex; flex-direction:column; flex-shrink:0; transition:width .2s ease; }
 .bank-ribbon-header { padding:12px 14px; border-bottom:1px solid var(--border); flex-shrink:0; }
 .bank-ribbon-list { flex:1; overflow-y:auto; padding:4px 0; }
 .bank-op-item { padding:10px 14px; border-bottom:1px solid var(--border2); }
@@ -568,6 +573,8 @@ select.form-input { appearance:none; }
           <div class="pill filter" data-filter="entered" onclick="setEnteredFilter('entered')">Внесені</div>
         </div>
         <span style="margin-left:auto;font-size:11px;color:var(--dim)">Кліки на ячейку → додати платіж</span>
+        <button class="btn btn-ghost btn-sm" id="calPanelsToggleBtn" onclick="toggleCalPanels()"
+          title="Згорнути/розгорнути праві панелі" style="margin-left:10px">◀</button>
       </div>
       <div class="cal-container">
         <div class="cal-wrap" id="calWrap">
@@ -1639,6 +1646,16 @@ function setEnteredFilter(val) {
   enteredFilter = val;
   document.querySelectorAll('#enteredFilterGroup .pill').forEach(p => p.classList.toggle('active', p.dataset.filter === val));
   renderCalendar(calData);
+}
+
+// Ручне згортання панелей "Банківські операції" + "Кеш-флоу" однією кнопкою — тільки в
+// межах сесії (localStorage тут не працює), тримається у звичайній змінній.
+let calPanelsCollapsed = false;
+function toggleCalPanels() {
+  calPanelsCollapsed = !calPanelsCollapsed;
+  document.getElementById('bankRibbon').classList.toggle('panel-collapsed', calPanelsCollapsed);
+  document.getElementById('sidePanel').classList.toggle('panel-collapsed', calPanelsCollapsed);
+  document.getElementById('calPanelsToggleBtn').textContent = calPanelsCollapsed ? '▶' : '◀';
 }
 
 function renderCalendar(data) {
