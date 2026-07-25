@@ -1220,6 +1220,39 @@ select.form-input { appearance:none; }
   </div>
 </div>
 
+<!-- TRANSFER MODAL -->
+<div class="modal-overlay" id="transferModal">
+  <div class="modal">
+    <div class="modal-title">Перевід між рахунками</div>
+    <div class="form-group">
+      <label class="form-label">З рахунку</label>
+      <select class="form-input" id="trFromAccount"></select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">На рахунок</label>
+      <select class="form-input" id="trToAccount"></select>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Сума (₴)</label>
+        <input class="form-input" type="number" id="trAmount" placeholder="0" step="0.01">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Дата</label>
+        <input class="form-input" type="date" id="trDate">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Коментар</label>
+      <input class="form-input" type="text" id="trNote" placeholder="Необов'язково...">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-cancel" onclick="closeModal('transferModal')">Скасувати</button>
+      <button class="btn btn-primary" onclick="saveTransfer()">Зберегти</button>
+    </div>
+  </div>
+</div>
+
 <!-- CURRENCY MODAL -->
 <div class="modal-overlay" id="currencyModal">
   <div class="modal">
@@ -1356,7 +1389,7 @@ async function loadMeta() {
     categories = (await catR.json()).flat || [];
     
     // Populate selects
-    const selects = ['txAccount', 'debtAccount', 'wAccount', 'cAccount'];
+    const selects = ['txAccount', 'debtAccount', 'wAccount', 'cAccount', 'trFromAccount', 'trToAccount'];
     selects.forEach(id => {
       const el = document.getElementById(id);
       if (!el) return;
@@ -2693,6 +2726,27 @@ async function saveWithdrawal() {
   } catch(e) { showToast('Помилка', 'error'); }
 }
 
+async function saveTransfer() {
+  const account_id = document.getElementById('trFromAccount').value;
+  const account_to_id = document.getElementById('trToAccount').value;
+  const amount = document.getElementById('trAmount').value;
+  const date = document.getElementById('trDate').value;
+  const note = document.getElementById('trNote').value;
+  if (!account_id || !account_to_id || !amount || !date) { showToast('Заповни всі поля', 'error'); return; }
+  if (account_id === account_to_id) { showToast('Оберіть різні рахунки', 'error'); return; }
+  try {
+    // type='transfer' — журнал переміщення грошей, не дохід і не витрата (не впливає
+    // на P&L/кеш-флоу, лише на баланс account_id/account_to_id — див. accounts.js).
+    const r = await fetch(API + '/api/transactions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({ type: 'transfer', account_id: parseInt(account_id), account_to_id: parseInt(account_to_id), amount: parseFloat(amount), date, note })
+    });
+    if (r.ok) { closeModal('transferModal'); showToast('Перевід збережено ✓', 'success'); loadTransfers(); loadBalances(); }
+    else { const e = await r.json(); showToast(e.error || 'Помилка', 'error'); }
+  } catch(e) { showToast('Помилка', 'error'); }
+}
+
 async function saveCurrencyOp() {
   const amount_uah = document.getElementById('cAmount').value;
   const date = document.getElementById('cDate').value;
@@ -3181,7 +3235,14 @@ function openCurrencyModal(type) {
   document.getElementById('cDate').value = new Date().toISOString().split('T')[0];
   document.getElementById('currencyModal').classList.add('show');
 }
-function openTransferModal() { showToast('Функція в розробці', 'error'); }
+function openTransferModal() {
+  document.getElementById('trFromAccount').value = '';
+  document.getElementById('trToAccount').value = '';
+  document.getElementById('trAmount').value = '';
+  document.getElementById('trDate').value = toISODate(new Date());
+  document.getElementById('trNote').value = '';
+  document.getElementById('transferModal').classList.add('show');
+}
 function openAddAccountModal() { showToast('Функція в розробці', 'error'); }
 function openAutopayModal() { showToast('Функція в розробці', 'error'); }
 function exportData() { showToast('Функція вигрузки в розробці', 'error'); }
