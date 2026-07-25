@@ -1260,6 +1260,45 @@ select.form-input { appearance:none; }
   </div>
 </div>
 
+<!-- AUTOPAY TEMPLATE MODAL -->
+<div class="modal-overlay" id="autopayModal">
+  <div class="modal">
+    <div class="modal-title">Шаблон автоплатежу</div>
+    <div class="form-group">
+      <label class="form-label">Назва</label>
+      <input class="form-input" type="text" id="arName" placeholder="Необов'язково — за замовчуванням назва статті">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Стаття витрат</label>
+      <input class="form-input" type="text" id="arCategorySearch" placeholder="Пошук статті..."
+        autocomplete="off" oninput="filterCategoryOptions('arCategory', 'arCategorySearch')" style="margin-bottom:6px">
+      <select class="form-input" id="arCategory">
+        <option value="">Оберіть статтю...</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Сума (₴)</label>
+        <input class="form-input" type="number" id="arAmount" placeholder="0" step="0.01">
+      </div>
+      <div class="form-group">
+        <label class="form-label">День місяця</label>
+        <input class="form-input" type="number" id="arDay" placeholder="1-31" min="1" max="31">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Рахунок / ФОП</label>
+      <select class="form-input" id="arAccount">
+        <option value="">Оберіть рахунок...</option>
+      </select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-cancel" onclick="closeModal('autopayModal')">Скасувати</button>
+      <button class="btn btn-primary" onclick="saveAutopay()">Зберегти</button>
+    </div>
+  </div>
+</div>
+
 <!-- CURRENCY MODAL -->
 <div class="modal-overlay" id="currencyModal">
   <div class="modal">
@@ -1396,7 +1435,7 @@ async function loadMeta() {
     categories = (await catR.json()).flat || [];
     
     // Populate selects
-    const selects = ['txAccount', 'debtAccount', 'wAccount', 'cAccount', 'trFromAccount', 'trToAccount'];
+    const selects = ['txAccount', 'debtAccount', 'wAccount', 'cAccount', 'trFromAccount', 'trToAccount', 'arAccount'];
     selects.forEach(id => {
       const el = document.getElementById(id);
       if (!el) return;
@@ -1428,6 +1467,10 @@ async function loadMeta() {
       catHtml += `<option value="${c.id}">${c.name}${c.cost_type ? ' ['+c.cost_type+']' : ''}</option>`;
     });
     if (groupOpen) catHtml += '</optgroup>';
+    // #arCategory (шаблон автоплатежу) використовує ту саму групу опцій, але БЕЗ
+    // "+ Своя стаття" — шаблон завжди прив'язаний до реальної статті з довідника.
+    document.getElementById('arCategory').innerHTML = catHtml;
+    filterCategoryOptions('arCategory', 'arCategorySearch');
     catHtml += `<option value="__custom__">+ Своя стаття...</option>`;
     catSel.innerHTML = catHtml;
     filterCategoryOptions();
@@ -2135,10 +2178,13 @@ async function loadSummary(refresh = false) {
   } catch(e) { console.error(e); }
 }
 
+let autopayData = [];
+
 async function loadAutopay() {
   try {
     const r = await fetch(`${API}/api/recurring`, { headers: { Authorization: 'Bearer ' + token } });
     const data = await r.json();
+    autopayData = data;
     const freqLabels = { monthly: 'Щомісяця', twice_monthly: '2 рази на місяць', weekly: 'Щотижня' };
     document.getElementById('autopayList').innerHTML = data.length === 0
       ? '<div class="empty-state"><div class="empty-icon">🔁</div><div class="empty-title">Немає автоплатежів</div><div class="empty-sub">Додай шаблон для повторюваних платежів</div></div>'
@@ -2152,7 +2198,10 @@ async function loadAutopay() {
             </div>
             <div style="text-align:right">
               <div style="font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:700;color:var(--red)">₴ ${fmt(t.amount)}</div>
-              ${currentUser.role === 'admin' ? `<button class="btn btn-ghost btn-sm" style="margin-top:6px" onclick="deleteAutopay(${t.id})">Видалити</button>` : ''}
+              <div style="margin-top:6px;display:flex;gap:6px;justify-content:flex-end">
+                ${currentUser.role !== 'viewer' ? `<button class="btn btn-primary btn-sm" onclick="createFromAutopay(${t.id})">Створити платіж</button>` : ''}
+                ${currentUser.role === 'admin' ? `<button class="btn btn-ghost btn-sm" onclick="deleteAutopay(${t.id})">Видалити</button>` : ''}
+              </div>
             </div>
           </div>
         </div>`).join('');
@@ -2499,9 +2548,11 @@ function toggleCustomCategory() {
 // збігаються за підрядком, і цілі optgroup, якщо в них не лишилось видимих статей.
 // Порядок опцій у DOM не міняється (sort_order з бекенду лишається як є) — тільки
 // показ/приховування. Плейсхолдер "" і "+ Своя стаття" завжди лишаються видимими.
-function filterCategoryOptions() {
-  const query = document.getElementById('txCategorySearch').value.trim().toLowerCase();
-  const sel = document.getElementById('txCategory');
+function filterCategoryOptions(selectId, searchId) {
+  selectId = selectId || 'txCategory';
+  searchId = searchId || 'txCategorySearch';
+  const query = document.getElementById(searchId).value.trim().toLowerCase();
+  const sel = document.getElementById(selectId);
   Array.from(sel.children).forEach(node => {
     if (node.tagName === 'OPTGROUP') {
       let groupHasMatch = false;
@@ -3273,7 +3324,63 @@ function openTransferModal() {
   document.getElementById('transferModal').classList.add('show');
 }
 function openAddAccountModal() { showToast('Функція в розробці', 'error'); }
-function openAutopayModal() { showToast('Функція в розробці', 'error'); }
+function openAutopayModal() {
+  document.getElementById('arName').value = '';
+  document.getElementById('arCategorySearch').value = '';
+  document.getElementById('arCategory').value = '';
+  filterCategoryOptions('arCategory', 'arCategorySearch');
+  document.getElementById('arAmount').value = '';
+  document.getElementById('arDay').value = '';
+  document.getElementById('arAccount').value = '';
+  document.getElementById('autopayModal').classList.add('show');
+}
+
+async function saveAutopay() {
+  const category_id = document.getElementById('arCategory').value;
+  const account_id = document.getElementById('arAccount').value;
+  const amount = document.getElementById('arAmount').value;
+  const day_of_month = document.getElementById('arDay').value;
+  let name = document.getElementById('arName').value.trim();
+  if (!category_id || !account_id || !amount || !day_of_month) { showToast('Заповни всі поля', 'error'); return; }
+  if (day_of_month < 1 || day_of_month > 31) { showToast('День місяця — від 1 до 31', 'error'); return; }
+  if (!name) {
+    const cat = categories.find(c => String(c.id) === String(category_id));
+    name = cat ? cat.name : 'Автоплатіж';
+  }
+  try {
+    const r = await fetch(API + '/api/recurring', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({
+        name, category_id: parseInt(category_id), account_id: parseInt(account_id),
+        amount: parseFloat(amount), frequency: 'monthly', day_of_month: parseInt(day_of_month)
+      })
+    });
+    if (r.ok) { closeModal('autopayModal'); showToast('Шаблон збережено ✓', 'success'); loadAutopay(); }
+    else { const e = await r.json(); showToast(e.error || 'Помилка', 'error'); }
+  } catch(e) { showToast('Помилка', 'error'); }
+}
+
+async function createFromAutopay(id) {
+  const tmpl = autopayData.find(t => t.id === id);
+  if (!tmpl) return;
+  const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
+  const day = Math.min(parseInt(tmpl.day_of_month) || 1, daysInMonth);
+  const date = `${currentYear}-${String(currentMonth).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+  try {
+    const r = await fetch(API + '/api/transactions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({
+        type: 'expense', date, amount: parseFloat(tmpl.amount),
+        account_id: tmpl.account_id, category_id: tmpl.category_id,
+        status: 'planned', note: `Автоплатіж: ${tmpl.name}`
+      })
+    });
+    if (r.ok) { showToast('Платіж створено ✓', 'success'); loadCalendar(); loadBalances(); }
+    else { const e = await r.json(); showToast(e.error || 'Помилка', 'error'); }
+  } catch(e) { showToast('Помилка', 'error'); }
+}
 function exportData() { showToast('Функція вигрузки в розробці', 'error'); }
 
 function closeModal(id) { document.getElementById(id).classList.remove('show'); }
