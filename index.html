@@ -2005,9 +2005,21 @@ async function loadTransfers() {
               <div style="font-size:11px;color:var(--muted);margin-top:3px">${fmtDate(t.date)} ${t.note ? '· ' + t.note : ''}</div>
             </div>
             <div style="font-family:'JetBrains Mono',monospace;font-size:16px;font-weight:700;color:var(--blue)">₴ ${fmt(t.amount)}</div>
+            <button class="btn btn-ghost btn-sm" onclick="deleteTransfer(${t.id})">🗑</button>
           </div>
         </div>`).join('');
   } catch(e) { console.error(e); }
+}
+
+async function deleteTransfer(id) {
+  if (!confirm('Видалити цей перевід?')) return;
+  try {
+    const r = await fetch(`${API}/api/transactions/${id}`, {
+      method: 'DELETE', headers: { Authorization: 'Bearer ' + token }
+    });
+    if (r.ok) { showToast('Перевід видалено ✓', 'success'); loadTransfers(); loadBalances(); }
+    else { const e = await r.json(); showToast(e.error || 'Помилка видалення', 'error'); }
+  } catch(e) { showToast('Помилка', 'error'); }
 }
 
 async function loadCashCount() {
