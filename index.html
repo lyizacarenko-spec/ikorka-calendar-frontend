@@ -1639,6 +1639,7 @@ function bankOpRowHtml(op) {
                ${bankCategoryOptionsHtml(null)}
              </select>
              <button class="btn btn-ghost btn-sm" onclick="sendBankOpToCash(${op.id}, this)">В касу</button>
+             ${op.account_is_owner ? `<button class="btn btn-ghost btn-sm" onclick="sendBankOpToOwner(${op.id}, this)">Вивід власника</button>` : ''}
            </div>`
       }
     </div>`;
@@ -1647,7 +1648,7 @@ function bankOpRowHtml(op) {
 // Спільна частина після успішного /process — і для вибору статті (expense/income),
 // і для "В касу" (transfer): позначаємо операцію обробленою локально, оновлюємо стрічку
 // й баланси. Різниться лише тіло запиту і toast-повідомлення.
-function onBankOpProcessed(opId, categoryId) {
+function onBankOpProcessed(opId, categoryId, label) {
   const op = bankOps.find(o => o.id === opId);
   if (op) {
     op.processed_at = new Date().toISOString();
@@ -1655,7 +1656,7 @@ function onBankOpProcessed(opId, categoryId) {
       op.category_id = categoryId;
       op.category_name = categories.find(c => String(c.id) === String(categoryId))?.name || '';
     } else {
-      op.category_name = 'Каса (переказ)';
+      op.category_name = label || 'Каса (переказ)';
     }
   }
   if (bankRibbonUnprocessedOnly) {
@@ -1707,6 +1708,30 @@ async function sendBankOpToCash(opId, btnEl) {
     }
     showToast('Переказ у касу створено ✓', 'success');
     onBankOpProcessed(opId, null);
+  } catch (e) {
+    showToast('Помилка мережі', 'error');
+    if (btnEl) btnEl.disabled = false;
+  }
+}
+
+// "Вивід власника" — показується лише на рахунках з account_is_owner=true (перевірка
+// й мапування account_id → owner — на бекенді, тут просто інший прапорець тіла запиту).
+async function sendBankOpToOwner(opId, btnEl) {
+  if (btnEl) btnEl.disabled = true;
+  try {
+    const r = await fetch(`${API}/api/bank-operations/${opId}/process`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({ to_owner: true })
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      showToast(data.error || 'Помилка', 'error');
+      if (btnEl) btnEl.disabled = false;
+      return;
+    }
+    showToast('Вивід власника створено ✓', 'success');
+    onBankOpProcessed(opId, null, 'Вивід власника');
   } catch (e) {
     showToast('Помилка мережі', 'error');
     if (btnEl) btnEl.disabled = false;
