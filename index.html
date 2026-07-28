@@ -2231,11 +2231,36 @@ async function loadWithdrawals() {
         <div class="big-card" style="margin-bottom:10px">
           <div style="display:flex;justify-content:space-between;align-items:center">
             <div><strong>${w.owner}</strong> · ${fmtDate(w.date)}</div>
-            <div style="font-family:'JetBrains Mono',monospace;font-size:16px;font-weight:700;color:var(--red)">−₴ ${fmt(w.amount)}</div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <div style="font-family:'JetBrains Mono',monospace;font-size:16px;font-weight:700;color:var(--red)">−₴ ${fmt(w.amount)}</div>
+              <button class="btn btn-ghost btn-sm" onclick="deleteWithdrawal(${w.id})">🗑</button>
+            </div>
           </div>
           <div style="font-size:12px;color:var(--muted);margin-top:6px">${w.account_name || '—'} ${w.note ? '· ' + w.note : ''}</div>
         </div>`).join('') || ''}`;
   } catch(e) { console.error(e); }
+}
+
+async function deleteWithdrawal(id) {
+  if (!confirm('Видалити цей вивід?')) return;
+  try {
+    const r = await fetch(`${API}/api/withdrawals/${id}`, {
+      method: 'DELETE', headers: { Authorization: 'Bearer ' + token }
+    });
+    if (r.ok) {
+      showToast('Вивід видалено ✓', 'success');
+      loadWithdrawals();
+      // Якщо вивід прийшов зі стрічки банківських операцій — бекенд зняв позначку з
+      // відповідної bank_operation, вона повернулась у необроблені. bankOps уже
+      // завантажений (якщо рахунок обраний у стрічці) — просто перезапитуємо.
+      if (bankRibbonAccountId) loadBankOperations();
+      loadCalendar();
+      loadBalances();
+    } else {
+      const e = await r.json();
+      showToast(e.error || 'Помилка видалення', 'error');
+    }
+  } catch(e) { showToast('Помилка', 'error'); }
 }
 
 async function loadTransfers() {
