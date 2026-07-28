@@ -641,6 +641,7 @@ select.form-input { appearance:none; }
               <input id="accountSearch" type="text" placeholder="Пошук рахунку..." oninput="filterAccounts()"
                 style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:7px 10px 7px 32px;color:var(--text);font-size:13px;font-family:'Inter',sans-serif;outline:none;width:220px">
             </div>
+            <button class="btn btn-ghost" id="syncAllBtn" onclick="syncAllAccounts()">🔄 Синхронізувати все</button>
             <button class="btn btn-primary" onclick="openAddAccountModal()">+ Додати рахунок</button>
           </div>
         </div>
@@ -2177,37 +2178,109 @@ async function loadDebts() {
   } catch(e) { console.error('loadDebts', e); }
 }
 
+let syncAllInProgress = false; // блокує всі окремі кнопки "Синхронізувати" картки на час проходу
+let syncingAccountId = null;   // id ФОП, що синкається прямо зараз (для спінера на картці)
+
 async function loadAccounts() {
   try {
     const r = await fetch(`${API}/api/accounts`, { headers: { Authorization: 'Bearer ' + token } });
     const data = await r.json();
     accounts = data.accounts || [];
-    document.getElementById('accountsGrid').innerHTML = accounts.map(a => {
-      const bal = parseFloat(a.current_balance || 0);
-      const isGap = bal < 0;
-      const isBankLinked = a.api_type === 'novapay' || a.api_type === 'privat';
-      const cardClick = isBankLinked ? `onclick="openStatementModal(${a.id}, '${(a.name||'').replace(/'/g,"\\'")}')" style="cursor:pointer"` : '';
-      return `
-        <div class="account-card ${isGap ? 'danger' : ''}" ${cardClick}>
-          <div class="account-header">
-            <div>
-              <div class="account-name">${a.name}</div>
-              <div class="account-bank">${a.bank || (a.type === 'cash' ? 'Готівка (ручний облік)' : '—')}</div>
-            </div>
-            <span class="account-badge ${a.api_type ? 'badge-api' : 'badge-manual'}">${a.api_type ? 'API авто' : 'Вручну'}</span>
-          </div>
-          <div class="account-balance ${isGap ? 'neg' : 'pos'}">₴ ${fmt(Math.abs(bal))}${isGap ? ' ⚠' : ''}</div>
-          <div class="account-stats">
-            <div><div class="acc-stat-lbl">Початковий залишок</div><div class="acc-stat-val">₴ ${fmt(a.initial_balance || 0)}</div></div>
-            <div><div class="acc-stat-lbl">Тип</div><div class="acc-stat-val">${a.type === 'fop' ? 'ФОП' : a.type === 'cash' ? 'Готівка' : 'Картка'}</div></div>
-          </div>
-          ${currentUser.role === 'admin' ? `<div class="account-actions">
-            ${isBankLinked ? `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); syncNovapay(${a.id})">🔄 Синхронізувати</button>` : `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); openBalanceModal(${a.id}, '${(a.name||'').replace(/'/g,"\\'")}', ${parseFloat(a.current_balance||0)})">✏️ Внести залишок</button>`}
-            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); archiveAccount(${a.id})">Архівувати</button>
-          </div>` : ''}
-        </div>`;
-    }).join('') || '<div class="empty-state"><div class="empty-icon">💳</div><div class="empty-title">Немає рахунків</div></div>';
+    renderAccountsGrid();
   } catch(e) { console.error('loadAccounts', e); }
+}
+
+function renderAccountsGrid() {
+  document.getElementById('accountsGrid').innerHTML = accounts.map(a => {
+    const bal = parseFloat(a.current_balance || 0);
+    const isGap = bal < 0;
+    const isBankLinked = a.api_type === 'novapay' || a.api_type === 'privat';
+    const cardClick = isBankLinked ? `onclick="openStatementModal(${a.id}, '${(a.name||'').replace(/'/g,"\\'")}')" style="cursor:pointer"` : '';
+    const isSyncingThis = syncingAccountId === a.id;
+    const syncBtnDisabled = syncAllInProgress ? 'disabled' : '';
+    const syncBtnLabel = isSyncingThis
+      ? `<div class="spinner" style="width:12px;height:12px;display:inline-block;vertical-align:middle;margin-right:6px"></div>Синхронізую...`
+      : '🔄 Синхронізувати';
+    return `
+      <div class="account-card ${isGap ? 'danger' : ''}" ${cardClick}>
+        <div class="account-header">
+          <div>
+            <div class="account-name">${a.name}</div>
+            <div class="account-bank">${a.bank || (a.type === 'cash' ? 'Готівка (ручний облік)' : '—')}</div>
+          </div>
+          <span class="account-badge ${a.api_type ? 'badge-api' : 'badge-manual'}">${a.api_type ? 'API авто' : 'Вручну'}</span>
+        </div>
+        <div class="account-balance ${isGap ? 'neg' : 'pos'}">₴ ${fmt(Math.abs(bal))}${isGap ? ' ⚠' : ''}</div>
+        <div class="account-stats">
+          <div><div class="acc-stat-lbl">Початковий залишок</div><div class="acc-stat-val">₴ ${fmt(a.initial_balance || 0)}</div></div>
+          <div><div class="acc-stat-lbl">Тип</div><div class="acc-stat-val">${a.type === 'fop' ? 'ФОП' : a.type === 'cash' ? 'Готівка' : 'Картка'}</div></div>
+        </div>
+        ${currentUser.role === 'admin' ? `<div class="account-actions">
+          ${isBankLinked ? `<button class="btn btn-primary btn-sm" ${syncBtnDisabled} onclick="event.stopPropagation(); syncNovapay(${a.id})">${syncBtnLabel}</button>` : `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); openBalanceModal(${a.id}, '${(a.name||'').replace(/'/g,"\\'")}', ${parseFloat(a.current_balance||0)})">✏️ Внести залишок</button>`}
+          <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); archiveAccount(${a.id})">Архівувати</button>
+        </div>` : ''}
+      </div>`;
+  }).join('') || '<div class="empty-state"><div class="empty-icon">💳</div><div class="empty-title">Немає рахунків</div></div>';
+}
+
+// "Синхронізувати все" — ПОСЛІДОВНО, один ФОП за раз (for...await, без Promise.all):
+// одноразовий refresh_token у NovaPay згорає при паралельних авторизаціях, особливо
+// небезпечно для ФОП зі спільними кредами (credentials_account_id — Лунько+Варакути).
+// Поки прохід триває, syncAllInProgress блокує й загальну кнопку, і кожну окрему
+// кнопку "Синхронізувати" на картках — інакше ручний клік під час проходу теж
+// зіб'ється в паралельний запит на той самий акаунт.
+async function syncAllAccounts() {
+  if (syncAllInProgress) return;
+
+  const targets = accounts.filter(a =>
+    (a.api_type === 'novapay' || a.api_type === 'privat') && (a.has_api_token || a.has_synced)
+  );
+  if (!targets.length) { showToast('Немає рахунків для синхронізації', 'error'); return; }
+
+  syncAllInProgress = true;
+  const btn = document.getElementById('syncAllBtn');
+  btn.disabled = true;
+  renderAccountsGrid();
+
+  let successCount = 0;
+  const failed = [];
+
+  for (let i = 0; i < targets.length; i++) {
+    const acc = targets[i];
+    btn.textContent = `Синхронізую... ${i + 1}/${targets.length}`;
+    syncingAccountId = acc.id;
+    renderAccountsGrid();
+
+    try {
+      const r = await fetch(`${API}/api/novapay/sync/${acc.id}`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + token }
+      });
+      const data = await r.json();
+      if (r.ok && data.success) {
+        successCount++;
+      } else {
+        failed.push({ name: acc.name, error: data.error || 'Помилка' });
+      }
+    } catch (e) {
+      failed.push({ name: acc.name, error: 'Помилка з\'єднання' });
+    }
+
+    syncingAccountId = null;
+    await loadAccounts(); // рефетч — баланс картки одразу реальний, серверний
+  }
+
+  syncAllInProgress = false;
+  btn.disabled = false;
+  btn.textContent = '🔄 Синхронізувати все';
+  renderAccountsGrid();
+  loadBalances();
+
+  if (failed.length === 0) {
+    showToast(`Синхронізовано ${successCount}/${targets.length} ✓`, 'success');
+  } else {
+    showToast(`Синхронізовано ${successCount}/${targets.length}, помилки: ${failed.map(f => f.name).join(', ')}`, 'error');
+  }
 }
 
 async function loadWithdrawals() {
