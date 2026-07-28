@@ -307,6 +307,9 @@ td.col-sum { z-index:5; background:var(--bg); }
 .cf-detail-pct { font-size:11px; color:var(--muted); font-family:'JetBrains Mono',monospace; }
 .cf-detail-items { padding:0 0 6px 18px; }
 .cf-detail-item { padding:5px 0; font-size:12px; }
+.cf-detail-item:hover { color:var(--text); }
+.cf-detail-payments { padding:0 0 4px 18px; }
+.cf-detail-payment { padding:3px 0; font-size:11px; color:var(--muted); }
 
 /* ACCOUNTS SCREEN */
 .accounts-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:14px; }
@@ -1861,6 +1864,7 @@ async function loadUpcoming() {
 
 let cfDetailGroups = [];
 let cfExpandedGroups = new Set(); // індекси розгорнутих груп у поточному renderCashflow-циклі
+let cfExpandedCategories = new Set(); // category_id розгорнутих статей (третій рівень — платежі)
 
 async function loadCashflow() {
   try {
@@ -1870,7 +1874,8 @@ async function loadCashflow() {
     const data = await r.json();
     cfDetailGroups = data.expenses?.detail || [];
     cfExpandedGroups = new Set(); // за замовчуванням всі групи згорнуті при кожному завантаженні
-    
+    cfExpandedCategories = new Set();
+
     // Mini cashflow in sidebar
     const cfMini = document.getElementById('cfMini');
     cfMini.innerHTML = `
@@ -1956,6 +1961,40 @@ function toggleCfGroup(i) {
   renderExpenseDetail();
 }
 
+function toggleCfCategory(categoryId) {
+  const key = String(categoryId);
+  if (cfExpandedCategories.has(key)) cfExpandedCategories.delete(key); else cfExpandedCategories.add(key);
+  renderExpenseDetail();
+}
+
+// Третій рівень "Деталізації витрат" — конкретні платежі статті. Не робимо окремий
+// запит: calData вже завантажений для того самого currentMonth/currentYear (loadCalendar
+// і loadCashflow завжди йдуть парою — і при старті, і при зміні періоду), і вже містить
+// потрібні транзакції згруповані по category_id → day. Фільтруємо type==='expense' явно
+// (calData змішує expense/income в одному бакеті категорії), інакше сума платежів у
+// списку могла б розійтись із сумою статті зверху, яка на бекенді рахується строго по
+// type='expense'.
+function getCategoryPayments(categoryId) {
+  const cat = calData.find(c => (c.category?.id ?? null) === categoryId);
+  if (!cat) return [];
+  const monthShort = ['','Січ','Лют','Бер','Квіт','Трав','Черв','Лип','Серп','Вер','Жовт','Лист','Груд'];
+  const payments = [];
+  Object.entries(cat.days || {}).forEach(([dayStr, ops]) => {
+    const day = parseInt(dayStr);
+    ops.forEach(op => {
+      if (op.type !== 'expense') return;
+      payments.push({
+        day,
+        dateLabel: `${day} ${monthShort[currentMonth]}`,
+        amount: parseFloat(op.amount),
+        account: op.account || '—'
+      });
+    });
+  });
+  payments.sort((a, b) => a.day - b.day);
+  return payments;
+}
+
 function renderExpenseDetail() {
   const el = document.getElementById('cfExpenseDetail');
   if (!el) return;
@@ -1976,8 +2015,28 @@ function renderExpenseDetail() {
         </div>
         ${expanded ? `
           <div class="cf-detail-items">
-            ${g.items.map(it => `
-              <div class="cf-row cf-detail-item"><span class="cf-lbl">${escapeHtml(it.category_name)}</span><span class="cf-val neg">−₴ ${fmt(it.total)}</span></div>`).join('')}
+            ${g.items.map(it => {
+              const catKey = String(it.category_id);
+              const catExpanded = cfExpandedCategories.has(catKey);
+              const payments = catExpanded ? getCategoryPayments(it.category_id) : [];
+              return `
+              <div class="cf-detail-category">
+                <div class="cf-row cf-detail-item" style="cursor:pointer" onclick="toggleCfCategory(${JSON.stringify(it.category_id)})">
+                  <span class="cf-lbl">${catExpanded ? '▾' : '▸'} ${escapeHtml(it.category_name)}</span>
+                  <span class="cf-val neg">−₴ ${fmt(it.total)}</span>
+                </div>
+                ${catExpanded ? `
+                  <div class="cf-detail-payments">
+                    ${payments.length === 0
+                      ? '<div style="color:var(--muted);font-size:11px;padding:4px 0">Немає окремих платежів</div>'
+                      : payments.map(p => `
+                        <div class="cf-row cf-detail-payment">
+                          <span class="cf-lbl">${p.dateLabel} · ${escapeHtml(p.account)}</span>
+                          <span class="cf-val neg">−₴ ${fmt(p.amount)}</span>
+                        </div>`).join('')}
+                  </div>` : ''}
+              </div>`;
+            }).join('')}
           </div>` : ''}
       </div>`;
   }).join('');
