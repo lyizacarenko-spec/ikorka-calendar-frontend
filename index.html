@@ -648,6 +648,14 @@ select.form-input { appearance:none; }
         <div class="accounts-grid" id="accountsGrid">
           <div class="loader"><div class="spinner"></div></div>
         </div>
+
+        <div class="section-header" id="accountsInactiveHeader" style="margin-top:24px;cursor:pointer;display:none" onclick="toggleInactiveAccounts()">
+          <div>
+            <div class="section-title" style="font-size:14px" id="accountsInactiveTitle">Деактивовані</div>
+          </div>
+          <span id="accountsInactiveArrow">▸</span>
+        </div>
+        <div class="accounts-grid" id="accountsInactiveGrid" style="display:none"></div>
       </div>
     </div>
 
@@ -1097,6 +1105,41 @@ select.form-input { appearance:none; }
     <div class="modal-actions">
       <button class="btn btn-cancel" onclick="closeModal('balanceModal')">Скасувати</button>
       <button class="btn btn-primary" onclick="saveBalance()">Зберегти</button>
+    </div>
+  </div>
+</div>
+
+<!-- ADD ACCOUNT MODAL -->
+<div class="modal-overlay" id="addAccountModal">
+  <div class="modal">
+    <div class="modal-title">Додати рахунок</div>
+    <div class="form-group">
+      <label class="form-label">Назва</label>
+      <input class="form-input" type="text" id="newAccName" placeholder="напр. ПриватБанк карта дебет Зайченко">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Початковий баланс (₴)</label>
+      <input class="form-input" type="number" id="newAccBalance" placeholder="0" step="0.01">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-cancel" onclick="closeModal('addAccountModal')">Скасувати</button>
+      <button class="btn btn-primary" onclick="saveNewAccount()">Зберегти</button>
+    </div>
+  </div>
+</div>
+
+<!-- EDIT ACCOUNT MODAL -->
+<div class="modal-overlay" id="editAccountModal">
+  <div class="modal">
+    <div class="modal-title">Редагувати рахунок</div>
+    <input type="hidden" id="editAccId">
+    <div class="form-group">
+      <label class="form-label">Назва</label>
+      <input class="form-input" type="text" id="editAccName">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-cancel" onclick="closeModal('editAccountModal')">Скасувати</button>
+      <button class="btn btn-primary" onclick="saveEditAccount()">Зберегти</button>
     </div>
   </div>
 </div>
@@ -2181,46 +2224,150 @@ async function loadDebts() {
 let syncAllInProgress = false; // блокує всі окремі кнопки "Синхронізувати" картки на час проходу
 let syncingAccountId = null;   // id ФОП, що синкається прямо зараз (для спінера на картці)
 
+let inactiveAccounts = [];
+
 async function loadAccounts() {
   try {
-    const r = await fetch(`${API}/api/accounts`, { headers: { Authorization: 'Bearer ' + token } });
+    // ?all=true (admin) — заодно тягне архівовані для розділу "Деактивовані", той
+    // самий патерн, що й GET /api/categories?all=true. Не-admin бачить лише активні.
+    const isAdmin = currentUser?.role === 'admin';
+    const url = isAdmin ? `${API}/api/accounts?all=true` : `${API}/api/accounts`;
+    const r = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
     const data = await r.json();
-    accounts = data.accounts || [];
+    const all = data.accounts || [];
+    accounts = all.filter(a => !a.is_archived);
+    inactiveAccounts = all.filter(a => a.is_archived);
     renderAccountsGrid();
+    renderInactiveAccounts();
   } catch(e) { console.error('loadAccounts', e); }
 }
 
-function renderAccountsGrid() {
-  document.getElementById('accountsGrid').innerHTML = accounts.map(a => {
-    const bal = parseFloat(a.current_balance || 0);
-    const isGap = bal < 0;
-    const isBankLinked = a.api_type === 'novapay' || a.api_type === 'privat';
-    const cardClick = isBankLinked ? `onclick="openStatementModal(${a.id}, '${(a.name||'').replace(/'/g,"\\'")}')" style="cursor:pointer"` : '';
-    const isSyncingThis = syncingAccountId === a.id;
-    const syncBtnDisabled = syncAllInProgress ? 'disabled' : '';
-    const syncBtnLabel = isSyncingThis
-      ? `<div class="spinner" style="width:12px;height:12px;display:inline-block;vertical-align:middle;margin-right:6px"></div>Синхронізую...`
-      : '🔄 Синхронізувати';
-    return `
-      <div class="account-card ${isGap ? 'danger' : ''}" ${cardClick}>
-        <div class="account-header">
-          <div>
-            <div class="account-name">${a.name}</div>
-            <div class="account-bank">${a.bank || (a.type === 'cash' ? 'Готівка (ручний облік)' : '—')}</div>
-          </div>
-          <span class="account-badge ${a.api_type ? 'badge-api' : 'badge-manual'}">${a.api_type ? 'API авто' : 'Вручну'}</span>
+function accountCardHTML(a, isActive) {
+  const bal = parseFloat(a.current_balance || 0);
+  const isGap = isActive && bal < 0;
+  const isBankLinked = a.api_type === 'novapay' || a.api_type === 'privat';
+  const cardClick = isActive && isBankLinked ? `onclick="openStatementModal(${a.id}, '${(a.name||'').replace(/'/g,"\\'")}')" style="cursor:pointer"` : '';
+  const isSyncingThis = isActive && syncingAccountId === a.id;
+  const syncBtnDisabled = syncAllInProgress ? 'disabled' : '';
+  const syncBtnLabel = isSyncingThis
+    ? `<div class="spinner" style="width:12px;height:12px;display:inline-block;vertical-align:middle;margin-right:6px"></div>Синхронізую...`
+    : '🔄 Синхронізувати';
+  const nameEsc = (a.name || '').replace(/'/g, "\\'");
+  return `
+    <div class="account-card ${isGap ? 'danger' : ''}" ${cardClick}>
+      <div class="account-header">
+        <div>
+          <div class="account-name">${a.name}</div>
+          <div class="account-bank">${a.bank || (a.type === 'cash' ? 'Готівка (ручний облік)' : '—')}</div>
         </div>
-        <div class="account-balance ${isGap ? 'neg' : 'pos'}">₴ ${fmt(Math.abs(bal))}${isGap ? ' ⚠' : ''}</div>
-        <div class="account-stats">
-          <div><div class="acc-stat-lbl">Початковий залишок</div><div class="acc-stat-val">₴ ${fmt(a.initial_balance || 0)}</div></div>
-          <div><div class="acc-stat-lbl">Тип</div><div class="acc-stat-val">${a.type === 'fop' ? 'ФОП' : a.type === 'cash' ? 'Готівка' : 'Картка'}</div></div>
-        </div>
-        ${currentUser.role === 'admin' ? `<div class="account-actions">
-          ${isBankLinked ? `<button class="btn btn-primary btn-sm" ${syncBtnDisabled} onclick="event.stopPropagation(); syncNovapay(${a.id})">${syncBtnLabel}</button>` : `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); openBalanceModal(${a.id}, '${(a.name||'').replace(/'/g,"\\'")}', ${parseFloat(a.current_balance||0)})">✏️ Внести залишок</button>`}
+        <span class="account-badge ${a.api_type ? 'badge-api' : 'badge-manual'}">${a.api_type ? 'API авто' : 'Вручну'}</span>
+      </div>
+      <div class="account-balance ${isGap ? 'neg' : 'pos'}">₴ ${fmt(Math.abs(bal))}${isGap ? ' ⚠' : ''}</div>
+      <div class="account-stats">
+        <div><div class="acc-stat-lbl">Початковий залишок</div><div class="acc-stat-val">₴ ${fmt(a.initial_balance || 0)}</div></div>
+        <div><div class="acc-stat-lbl">Тип</div><div class="acc-stat-val">${a.type === 'fop' ? 'ФОП' : a.type === 'cash' ? 'Готівка' : 'Картка'}</div></div>
+      </div>
+      ${currentUser.role === 'admin' ? `<div class="account-actions">
+        ${isActive ? `
+          ${isBankLinked ? `<button class="btn btn-primary btn-sm" ${syncBtnDisabled} onclick="event.stopPropagation(); syncNovapay(${a.id})">${syncBtnLabel}</button>` : `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); openBalanceModal(${a.id}, '${nameEsc}', ${parseFloat(a.current_balance||0)})">✏️ Внести залишок</button>`}
+          <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); openEditAccountModal(${a.id}, '${nameEsc}')">✏️</button>
           <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); archiveAccount(${a.id})">Архівувати</button>
-        </div>` : ''}
-      </div>`;
-  }).join('') || '<div class="empty-state"><div class="empty-icon">💳</div><div class="empty-title">Немає рахунків</div></div>';
+        ` : `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); restoreAccount(${a.id})">↩️ Відновити</button>`}
+      </div>` : ''}
+    </div>`;
+}
+
+function renderAccountsGrid() {
+  document.getElementById('accountsGrid').innerHTML = accounts.map(a => accountCardHTML(a, true)).join('')
+    || '<div class="empty-state"><div class="empty-icon">💳</div><div class="empty-title">Немає рахунків</div></div>';
+}
+
+function renderInactiveAccounts() {
+  const header = document.getElementById('accountsInactiveHeader');
+  if (currentUser.role !== 'admin') { header.style.display = 'none'; return; }
+  header.style.display = 'flex';
+  document.getElementById('accountsInactiveTitle').textContent = `Деактивовані (${inactiveAccounts.length})`;
+  document.getElementById('accountsInactiveGrid').innerHTML = inactiveAccounts.length === 0
+    ? '<div style="font-size:12px;color:var(--muted);padding:8px 0">Немає деактивованих рахунків</div>'
+    : inactiveAccounts.map(a => accountCardHTML(a, false)).join('');
+}
+
+function toggleInactiveAccounts() {
+  const grid = document.getElementById('accountsInactiveGrid');
+  const arrow = document.getElementById('accountsInactiveArrow');
+  const show = grid.style.display === 'none';
+  grid.style.display = show ? 'grid' : 'none';
+  arrow.textContent = show ? '▾' : '▸';
+}
+
+async function restoreAccount(id) {
+  try {
+    const r = await fetch(`${API}/api/accounts/${id}/restore`, {
+      method: 'POST', headers: { Authorization: 'Bearer ' + token }
+    });
+    if (r.ok) { showToast('Рахунок відновлено ✓', 'success'); loadAccounts(); loadMeta(); }
+    else { const e = await r.json(); showToast(e.error || 'Помилка', 'error'); }
+  } catch(e) { showToast('Помилка', 'error'); }
+}
+
+function openAddAccountModal() {
+  document.getElementById('newAccName').value = '';
+  document.getElementById('newAccBalance').value = '';
+  document.getElementById('addAccountModal').classList.add('show');
+}
+
+async function saveNewAccount() {
+  const name = document.getElementById('newAccName').value.trim();
+  const initial_balance = document.getElementById('newAccBalance').value;
+  if (!name) { showToast('Введи назву', 'error'); return; }
+  try {
+    const r = await fetch(`${API}/api/accounts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({ name, bank: null, type: 'card', api_type: null, initial_balance: parseFloat(initial_balance) || 0 })
+    });
+    if (r.ok) {
+      closeModal('addAccountModal');
+      showToast('Рахунок створено ✓', 'success');
+      loadAccounts();
+      loadMeta();
+      loadBalances();
+    } else {
+      const e = await r.json();
+      showToast(e.error || 'Помилка', 'error');
+    }
+  } catch(e) { showToast('Помилка', 'error'); }
+}
+
+function openEditAccountModal(id, name) {
+  document.getElementById('editAccId').value = id;
+  document.getElementById('editAccName').value = name;
+  document.getElementById('editAccountModal').classList.add('show');
+}
+
+async function saveEditAccount() {
+  const id = document.getElementById('editAccId').value;
+  const name = document.getElementById('editAccName').value.trim();
+  if (!name) { showToast('Введи назву', 'error'); return; }
+  // PUT перезаписує bank/initial_balance разом з name — беремо їх незмінними з уже
+  // завантаженого accounts[], щоб не зачепити баланс (для нього є окрема "Внести залишок").
+  const acc = accounts.find(a => a.id === parseInt(id)) || inactiveAccounts.find(a => a.id === parseInt(id));
+  try {
+    const r = await fetch(`${API}/api/accounts/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({ name, bank: acc?.bank ?? null, initial_balance: acc?.initial_balance ?? 0 })
+    });
+    if (r.ok) {
+      closeModal('editAccountModal');
+      showToast('Рахунок оновлено ✓', 'success');
+      loadAccounts();
+      loadMeta();
+    } else {
+      const e = await r.json();
+      showToast(e.error || 'Помилка', 'error');
+    }
+  } catch(e) { showToast('Помилка', 'error'); }
 }
 
 // "Синхронізувати все" — ПОСЛІДОВНО, один ФОП за раз (for...await, без Promise.all):
@@ -3664,7 +3811,6 @@ function openTransferModal() {
   document.getElementById('trNote').value = '';
   document.getElementById('transferModal').classList.add('show');
 }
-function openAddAccountModal() { showToast('Функція в розробці', 'error'); }
 function openAutopayModal() {
   document.getElementById('arName').value = '';
   document.getElementById('arCategorySearch').value = '';
