@@ -1866,12 +1866,24 @@ let cfDetailGroups = [];
 let cfExpandedGroups = new Set(); // індекси розгорнутих груп у поточному renderCashflow-циклі
 let cfExpandedCategories = new Set(); // category_id розгорнутих статей (третій рівень — платежі)
 
+let cfRevenues = { gb: null, hb: null };
+let cfExpensesPaid = { gb: 0, hb: 0, common: 0, all: 0 };
+
 async function loadCashflow() {
   try {
-    const r = await fetch(`${API}/api/cashflow?month=${currentMonth}&year=${currentYear}`, {
-      headers: { Authorization: 'Bearer ' + token }
-    });
+    // Обороти тягнемо тим самим циклом, що й кеш-флоу — один Promise.all, не
+    // послідовні запити, і обидва завжди за той самий currentMonth/currentYear.
+    const [r, revR] = await Promise.all([
+      fetch(`${API}/api/cashflow?month=${currentMonth}&year=${currentYear}`, {
+        headers: { Authorization: 'Bearer ' + token }
+      }),
+      fetch(`${API}/api/revenues?month=${currentMonth}&year=${currentYear}`, {
+        headers: { Authorization: 'Bearer ' + token }
+      })
+    ]);
     const data = await r.json();
+    cfRevenues = revR.ok ? await revR.json() : { gb: null, hb: null };
+    cfExpensesPaid = data.expenses_paid || { gb: 0, hb: 0, common: 0, all: 0 };
     cfDetailGroups = data.expenses?.detail || [];
     cfExpandedGroups = new Set(); // за замовчуванням всі групи згорнуті при кожному завантаженні
     cfExpandedCategories = new Set();
@@ -1900,6 +1912,7 @@ async function loadCashflow() {
       <div class="stat-card"><div class="stat-lbl">Прогноз на кінець</div><div class="stat-val ${(data.closing_balance || 0) < 0 ? 'neg' : 'pos'}">₴ ${fmt(data.closing_balance || 0)}</div></div>`;
 
     document.getElementById('cfDetails').innerHTML = `
+      ${renderRevenueBlock()}
       <div class="big-card">
         <div class="big-card-title">Приходи по рахунках</div>
         ${(data.income?.by_account || []).map(a => `
@@ -1954,6 +1967,60 @@ async function loadCashflow() {
 
     renderExpenseDetail();
   } catch(e) { console.error('loadCashflow', e); }
+}
+
+// "Обороти та % витрат" — Оборот вноситься вручну (Женя), % рахується від витрат
+// зі status='paid' (cfExpensesPaid, з відповіді кеш-флоу). Захист від ділення на
+// нуль: якщо оборот напрямку 0 або не внесений (null) — "—", ніяких Infinity/NaN.
+function pctOf(expense, revenue) {
+  if (!revenue || revenue <= 0) return '—';
+  return (expense / revenue * 100).toFixed(1).replace('.', ',') + '%';
+}
+
+function renderRevenueBlock() {
+  const gb = cfRevenues.gb;
+  const hb = cfRevenues.hb;
+  const total = (gb || 0) + (hb || 0);
+  return `
+    <div class="big-card" id="cfRevenueBlock">
+      <div class="big-card-title">Обороти та % витрат</div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Оборот ГБ (₴)</label>
+          <input class="form-input" type="number" id="revGb" value="${gb ?? ''}" placeholder="0" step="0.01" onblur="saveRevenue('gb', this.value)">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Оборот ХБ+відмови (₴)</label>
+          <input class="form-input" type="number" id="revHb" value="${hb ?? ''}" placeholder="0" step="0.01" onblur="saveRevenue('hb', this.value)">
+        </div>
+      </div>
+      <div class="cf-row"><span class="cf-lbl">Загальний оборот</span><span class="cf-val pos">₴ ${fmt(total)}</span></div>
+      <div class="cf-row"><span class="cf-lbl">% витрат ГБ</span><span class="cf-val">${pctOf(cfExpensesPaid.gb, gb)}</span></div>
+      <div class="cf-row"><span class="cf-lbl">% витрат ХБ+відмови</span><span class="cf-val">${pctOf(cfExpensesPaid.hb, hb)}</span></div>
+      <div class="cf-row"><span class="cf-lbl">% загальних витрат</span><span class="cf-val">${pctOf(cfExpensesPaid.common, total)}</span></div>
+      <div class="cf-total-row"><span class="cf-total-lbl">Загальний % витрат</span><span class="cf-total-val">${pctOf(cfExpensesPaid.all, total)}</span></div>
+    </div>`;
+}
+
+async function saveRevenue(direction, value) {
+  const amount = parseFloat(value);
+  if (isNaN(amount)) return; // порожнє поле — нічого не зберігаємо, не затираємо старе
+  try {
+    const r = await fetch(API + '/api/revenues', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({ year: currentYear, month: currentMonth, direction, amount })
+    });
+    if (r.ok) {
+      cfRevenues[direction] = amount;
+      showToast('Оборот збережено ✓', 'success');
+      const block = document.getElementById('cfRevenueBlock');
+      if (block) block.outerHTML = renderRevenueBlock();
+    } else {
+      const e = await r.json();
+      showToast(e.error || 'Помилка', 'error');
+    }
+  } catch(e) { showToast('Помилка мережі', 'error'); }
 }
 
 function toggleCfGroup(i) {
