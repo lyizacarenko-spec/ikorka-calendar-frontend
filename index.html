@@ -2296,21 +2296,75 @@ async function deleteTransfer(id) {
   } catch(e) { showToast('Помилка', 'error'); }
 }
 
+// Номінали в порядку спадання — і для розбивки в історії, і як єдине джерело
+// відповідності "сума по номіналах = total": рахуємо суму сам із цих же полів,
+// а не довіряємо збереженому cash_counts.total (schema.sql застаріла й не знає
+// про дрібні номінали, тож не покладаємось на GENERATED-колонку з БД).
+const CASH_DENOMINATIONS = [
+  { key: 'denomination_1000', label: '₴1000', value: 1000 },
+  { key: 'denomination_500', label: '₴500', value: 500 },
+  { key: 'denomination_200', label: '₴200', value: 200 },
+  { key: 'denomination_100', label: '₴100', value: 100 },
+  { key: 'denomination_50', label: '₴50', value: 50 },
+  { key: 'denomination_20', label: '₴20', value: 20 },
+  { key: 'denomination_10', label: '₴10', value: 10 },
+  { key: 'denomination_5', label: '₴5', value: 5 },
+  { key: 'denomination_2', label: '₴2', value: 2 },
+  { key: 'denomination_1', label: '₴1', value: 1 },
+  { key: 'denomination_50k', label: '50 коп', value: 0.5 },
+  { key: 'denomination_10k', label: '10 коп', value: 0.1 },
+];
+
+let ccHistoryData = [];
+let ccExpandedCounts = new Set(); // id розгорнутих записів історії перерахунків
+
 async function loadCashCount() {
   try {
     const r = await fetch(`${API}/api/cash-count/history`, { headers: { Authorization: 'Bearer ' + token } });
-    const data = await r.json();
-    document.getElementById('cashHistory').innerHTML = data.length === 0
-      ? '<div style="color:var(--muted);font-size:13px">Немає перерахунків</div>'
-      : data.map(c => `
-        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">
+    ccHistoryData = await r.json();
+    ccExpandedCounts = new Set();
+    renderCashHistory();
+  } catch(e) { console.error(e); }
+}
+
+function toggleCashCount(id) {
+  const key = String(id);
+  if (ccExpandedCounts.has(key)) ccExpandedCounts.delete(key); else ccExpandedCounts.add(key);
+  renderCashHistory();
+}
+
+function renderCashHistory() {
+  const el = document.getElementById('cashHistory');
+  if (!ccHistoryData.length) {
+    el.innerHTML = '<div style="color:var(--muted);font-size:13px">Немає перерахунків</div>';
+    return;
+  }
+  el.innerHTML = ccHistoryData.map(c => {
+    const expanded = ccExpandedCounts.has(String(c.id));
+    const rows = CASH_DENOMINATIONS
+      .map(d => ({ ...d, qty: parseInt(c[d.key]) || 0 }))
+      .filter(d => d.qty > 0);
+    return `
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleCashCount(${c.id})">
           <div>
-            <div style="font-size:13px;font-weight:600">${fmtDate(c.date)}</div>
+            <div style="font-size:13px;font-weight:600">${expanded ? '▾' : '▸'} ${fmtDate(c.date)}</div>
             <div style="font-size:11px;color:var(--muted)">Виконав: ${c.created_by_name || '—'}</div>
           </div>
           <div style="font-family:'JetBrains Mono',monospace;font-size:16px;font-weight:700;color:var(--green)">₴ ${fmt(c.total)}</div>
-        </div>`).join('');
-  } catch(e) { console.error(e); }
+        </div>
+        ${expanded ? `
+          <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border2)">
+            ${rows.length === 0
+              ? '<div style="color:var(--muted);font-size:12px">Немає купюр/монет</div>'
+              : rows.map(d => `
+                <div class="cf-row" style="padding:4px 0">
+                  <span class="cf-lbl" style="font-size:12px">${d.label} × ${d.qty} шт</span>
+                  <span class="cf-val" style="font-size:12px">₴ ${fmt(d.qty * d.value)}</span>
+                </div>`).join('')}
+          </div>` : ''}
+      </div>`;
+  }).join('');
 }
 
 async function loadCurrencyReserve() {
