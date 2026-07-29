@@ -1935,6 +1935,11 @@ let cfDetailGroups = [];
 let cfExpandedGroups = new Set(); // індекси розгорнутих груп у поточному renderCashflow-циклі
 let cfExpandedCategories = new Set(); // category_id розгорнутих статей (третій рівень — платежі)
 
+let cfWeeklyData = [];
+let cfExpandedWeeks = new Set(); // week_num розгорнутих тижнів у "По тижнях"
+let cfWeekExpandedGroups = new Set(); // ключі `${week_num}:${i}` — незалежно від cfExpandedGroups
+let cfWeekExpandedCategories = new Set(); // ключі `${week_num}:${category_id}`
+
 let cfRevenues = { gb: null, hb: null };
 let cfExpensesPaid = { gb: 0, hb: 0, common: 0, all: 0 };
 
@@ -1956,6 +1961,10 @@ async function loadCashflow() {
     cfDetailGroups = data.expenses?.detail || [];
     cfExpandedGroups = new Set(); // за замовчуванням всі групи згорнуті при кожному завантаженні
     cfExpandedCategories = new Set();
+    cfWeeklyData = data.weekly || [];
+    cfExpandedWeeks = new Set();
+    cfWeekExpandedGroups = new Set();
+    cfWeekExpandedCategories = new Set();
 
     // Mini cashflow in sidebar
     const cfMini = document.getElementById('cfMini');
@@ -2000,32 +2009,7 @@ async function loadCashflow() {
       </div>
       <div class="big-card">
         <div class="big-card-title">По тижнях</div>
-        ${(data.weekly || []).length === 0
-          ? '<div style="color:var(--muted);font-size:13px">Немає даних</div>'
-          : `<table style="width:100%;border-collapse:collapse;font-size:13px">
-              <thead>
-                <tr style="border-bottom:1px solid var(--border)">
-                  <th style="text-align:left;padding:8px 4px;font-size:11px;color:var(--muted);font-weight:600">ТИЖДЕНЬ</th>
-                  <th style="text-align:right;padding:8px 4px;font-size:11px;color:var(--muted);font-weight:600">ПРИХІД</th>
-                  <th style="text-align:right;padding:8px 4px;font-size:11px;color:var(--muted);font-weight:600">FC</th>
-                  <th style="text-align:right;padding:8px 4px;font-size:11px;color:var(--muted);font-weight:600">VC</th>
-                  <th style="text-align:right;padding:8px 4px;font-size:11px;color:var(--muted);font-weight:600">ВСЬОГО</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${data.weekly.map(w => `
-                  <tr style="border-bottom:1px solid var(--border2)">
-                    <td style="padding:8px 4px">
-                      <div style="font-weight:600">Тиждень ${w.week_num}</div>
-                      <div style="font-size:11px;color:var(--muted)">${fmtDate(w.week_start)} — ${fmtDate(w.week_end)}</div>
-                    </td>
-                    <td style="text-align:right;padding:8px 4px;font-family:'JetBrains Mono',monospace;color:${parseFloat(w.income)>0?'var(--green)':'var(--dim)'}">${parseFloat(w.income)>0?'+₴ '+fmt(w.income):'—'}</td>
-                    <td style="text-align:right;padding:8px 4px;font-family:'JetBrains Mono',monospace;color:var(--blue)">${parseFloat(w.fc)>0?'₴ '+fmt(w.fc):'—'}</td>
-                    <td style="text-align:right;padding:8px 4px;font-family:'JetBrains Mono',monospace;color:var(--amber)">${parseFloat(w.vc)>0?'₴ '+fmt(w.vc):'—'}</td>
-                    <td style="text-align:right;padding:8px 4px;font-family:'JetBrains Mono',monospace;font-weight:700;color:var(--red)">−₴ ${fmt(w.expense)}</td>
-                  </tr>`).join('')}
-              </tbody>
-            </table>`}
+        <div id="cfWeeklyTable"></div>
       </div>
       <div class="big-card">
         <div class="big-card-title">Вивід власників (окремо)</div>
@@ -2035,6 +2019,7 @@ async function loadCashflow() {
       </div>`;
 
     renderExpenseDetail();
+    renderWeeklyTable();
   } catch(e) { console.error('loadCashflow', e); }
 }
 
@@ -2110,13 +2095,16 @@ function toggleCfCategory(categoryId) {
 // (calData змішує expense/income в одному бакеті категорії), інакше сума платежів у
 // списку могла б розійтись із сумою статті зверху, яка на бекенді рахується строго по
 // type='expense'.
-function getCategoryPayments(categoryId) {
+function getCategoryPayments(categoryId, dayFrom, dayTo) {
   const cat = calData.find(c => (c.category?.id ?? null) === categoryId);
   if (!cat) return [];
   const monthShort = ['','Січ','Лют','Бер','Квіт','Трав','Черв','Лип','Серп','Вер','Жовт','Лист','Груд'];
+  const from = dayFrom ?? 1;
+  const to = dayTo ?? 31;
   const payments = [];
   Object.entries(cat.days || {}).forEach(([dayStr, ops]) => {
     const day = parseInt(dayStr);
+    if (day < from || day > to) return;
     ops.forEach(op => {
       if (op.type !== 'expense') return;
       payments.push({
@@ -2131,18 +2119,67 @@ function getCategoryPayments(categoryId) {
   return payments;
 }
 
-function renderExpenseDetail() {
-  const el = document.getElementById('cfExpenseDetail');
-  if (!el) return;
-  if (!cfDetailGroups.length) {
-    el.innerHTML = '<div style="color:var(--muted);font-size:13px">Немає витрат за період</div>';
-    return;
+// Той самий алгоритм, що backend рахує для week_num у cashflow.js: бакети днів
+// (week_num-1)*7+1 .. min(week_num*7, daysInMonth) — не MIN/MAX реальних дат
+// транзакцій (w.week_start/week_end), а фіксовані межі, інакше "дірки" в датах
+// зсунуть діапазон і сума груп розійдеться з w.expense.
+function getWeekDayRange(weekNum) {
+  const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
+  return { dayFrom: (weekNum - 1) * 7 + 1, dayTo: Math.min(weekNum * 7, daysInMonth) };
+}
+
+// Групи->статті для одного тижня — той самий підхід, що backend використовує для
+// expense_detail за місяць (group_name, ORDER BY total DESC, "Без статті" останньою),
+// але рахується на фронті з calData, обмежено діапазоном днів тижня. weekExpenseTotal
+// (w.expense з таблиці "По тижнях") — знаменник для %, щоб групи сходились із "Всього".
+function getWeekExpenseGroups(weekNum, weekExpenseTotal) {
+  const { dayFrom, dayTo } = getWeekDayRange(weekNum);
+  const groupMap = new Map();
+  calData.forEach(catEntry => {
+    const cat = catEntry.category || {};
+    let catTotal = 0;
+    Object.entries(catEntry.days || {}).forEach(([dayStr, ops]) => {
+      const day = parseInt(dayStr);
+      if (day < dayFrom || day > dayTo) return;
+      ops.forEach(op => { if (op.type === 'expense') catTotal += parseFloat(op.amount); });
+    });
+    if (catTotal <= 0) return;
+    const groupName = cat.group || 'Без статті';
+    if (!groupMap.has(groupName)) groupMap.set(groupName, { group_name: groupName, total: 0, items: [] });
+    const g = groupMap.get(groupName);
+    g.total += catTotal;
+    g.items.push({ category_id: cat.id ?? null, category_name: cat.name || 'Не вказано', total: catTotal });
+  });
+  const NO_CATEGORY_GROUP = 'Без статті';
+  return Array.from(groupMap.values())
+    .sort((a, b) => {
+      if (a.group_name === NO_CATEGORY_GROUP) return 1;
+      if (b.group_name === NO_CATEGORY_GROUP) return -1;
+      return b.total - a.total;
+    })
+    .map(g => ({
+      ...g,
+      items: g.items.sort((a, b) => b.total - a.total),
+      percent: weekExpenseTotal > 0 ? Math.round((g.total / weekExpenseTotal) * 1000) / 10 : 0
+    }));
+}
+
+// Спільний рушій "групи -> статті -> платежі", використовується і головною
+// "Деталізацією витрат" (весь місяць), і розгортанням кожного тижня в "По тижнях"
+// (dayFrom/dayTo обмежують і платежі, і — через опції — сам виклик, який будує groups).
+// groupToggle/catToggle — рядки onclick-виразів (не функції — це вставляється у
+// HTML-атрибут), щоб один рендер обслуговував обидва контексти з різними Set-ами.
+function renderDetailGroupsHTML(groups, opts) {
+  const { expandedGroups, expandedCategories, groupToggle, catToggle, dayFrom, dayTo } = opts;
+  if (!groups.length) {
+    return '<div style="color:var(--muted);font-size:12px;padding:6px 0">Немає витрат за цей період</div>';
   }
-  el.innerHTML = cfDetailGroups.map((g, i) => {
-    const expanded = cfExpandedGroups.has(i);
+  return groups.map((g, i) => {
+    const groupKey = opts.groupKey ? opts.groupKey(i) : i;
+    const expanded = expandedGroups.has(groupKey);
     return `
       <div class="cf-detail-group">
-        <div class="cf-detail-group-row" onclick="toggleCfGroup(${i})">
+        <div class="cf-detail-group-row" onclick="${groupToggle(i)}">
           <span class="cf-detail-group-name">${expanded ? '▾' : '▸'} ${escapeHtml(g.group_name)}</span>
           <span class="cf-detail-group-sum">
             <span class="cf-detail-pct">${g.percent.toFixed(1).replace('.', ',')}%</span>
@@ -2152,12 +2189,12 @@ function renderExpenseDetail() {
         ${expanded ? `
           <div class="cf-detail-items">
             ${g.items.map(it => {
-              const catKey = String(it.category_id);
-              const catExpanded = cfExpandedCategories.has(catKey);
-              const payments = catExpanded ? getCategoryPayments(it.category_id) : [];
+              const catKey = opts.catKey ? opts.catKey(it.category_id) : String(it.category_id);
+              const catExpanded = expandedCategories.has(catKey);
+              const payments = catExpanded ? getCategoryPayments(it.category_id, dayFrom, dayTo) : [];
               return `
               <div class="cf-detail-category">
-                <div class="cf-row cf-detail-item" style="cursor:pointer" onclick="toggleCfCategory(${JSON.stringify(it.category_id)})">
+                <div class="cf-row cf-detail-item" style="cursor:pointer" onclick="${catToggle(it.category_id)}">
                   <span class="cf-lbl">${catExpanded ? '▾' : '▸'} ${escapeHtml(it.category_name)}</span>
                   <span class="cf-val neg">−₴ ${fmt(it.total)}</span>
                 </div>
@@ -2176,6 +2213,88 @@ function renderExpenseDetail() {
           </div>` : ''}
       </div>`;
   }).join('');
+}
+
+function renderExpenseDetail() {
+  const el = document.getElementById('cfExpenseDetail');
+  if (!el) return;
+  el.innerHTML = renderDetailGroupsHTML(cfDetailGroups, {
+    expandedGroups: cfExpandedGroups,
+    expandedCategories: cfExpandedCategories,
+    groupToggle: (i) => `toggleCfGroup(${i})`,
+    catToggle: (catId) => `toggleCfCategory(${JSON.stringify(catId)})`,
+  });
+}
+
+function toggleCfWeek(weekNum) {
+  const key = String(weekNum);
+  if (cfExpandedWeeks.has(key)) cfExpandedWeeks.delete(key); else cfExpandedWeeks.add(key);
+  renderWeeklyTable();
+}
+
+function toggleCfWeekGroup(weekNum, i) {
+  const key = `${weekNum}:${i}`;
+  if (cfWeekExpandedGroups.has(key)) cfWeekExpandedGroups.delete(key); else cfWeekExpandedGroups.add(key);
+  renderWeeklyTable();
+}
+
+function toggleCfWeekCategory(weekNum, categoryId) {
+  const key = `${weekNum}:${categoryId}`;
+  if (cfWeekExpandedCategories.has(key)) cfWeekExpandedCategories.delete(key); else cfWeekExpandedCategories.add(key);
+  renderWeeklyTable();
+}
+
+function renderWeeklyTable() {
+  const el = document.getElementById('cfWeeklyTable');
+  if (!el) return;
+  if (!cfWeeklyData.length) {
+    el.innerHTML = '<div style="color:var(--muted);font-size:13px">Немає даних</div>';
+    return;
+  }
+  el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead>
+        <tr style="border-bottom:1px solid var(--border)">
+          <th style="text-align:left;padding:8px 4px;font-size:11px;color:var(--muted);font-weight:600">ТИЖДЕНЬ</th>
+          <th style="text-align:right;padding:8px 4px;font-size:11px;color:var(--muted);font-weight:600">ПРИХІД</th>
+          <th style="text-align:right;padding:8px 4px;font-size:11px;color:var(--muted);font-weight:600">FC</th>
+          <th style="text-align:right;padding:8px 4px;font-size:11px;color:var(--muted);font-weight:600">VC</th>
+          <th style="text-align:right;padding:8px 4px;font-size:11px;color:var(--muted);font-weight:600">ВСЬОГО</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${cfWeeklyData.map(w => {
+          const weekKey = String(w.week_num);
+          const expanded = cfExpandedWeeks.has(weekKey);
+          const weekGroups = expanded ? getWeekExpenseGroups(w.week_num, parseFloat(w.expense) || 0) : [];
+          const { dayFrom, dayTo } = getWeekDayRange(w.week_num);
+          return `
+          <tr style="border-bottom:1px solid var(--border2);cursor:pointer" onclick="toggleCfWeek(${w.week_num})">
+            <td style="padding:8px 4px">
+              <div style="font-weight:600">${expanded ? '▾' : '▸'} Тиждень ${w.week_num}</div>
+              <div style="font-size:11px;color:var(--muted)">${fmtDate(w.week_start)} — ${fmtDate(w.week_end)}</div>
+            </td>
+            <td style="text-align:right;padding:8px 4px;font-family:'JetBrains Mono',monospace;color:${parseFloat(w.income)>0?'var(--green)':'var(--dim)'}">${parseFloat(w.income)>0?'+₴ '+fmt(w.income):'—'}</td>
+            <td style="text-align:right;padding:8px 4px;font-family:'JetBrains Mono',monospace;color:var(--blue)">${parseFloat(w.fc)>0?'₴ '+fmt(w.fc):'—'}</td>
+            <td style="text-align:right;padding:8px 4px;font-family:'JetBrains Mono',monospace;color:var(--amber)">${parseFloat(w.vc)>0?'₴ '+fmt(w.vc):'—'}</td>
+            <td style="text-align:right;padding:8px 4px;font-family:'JetBrains Mono',monospace;font-weight:700;color:var(--red)">−₴ ${fmt(w.expense)}</td>
+          </tr>
+          ${expanded ? `
+          <tr>
+            <td colspan="5" style="padding:0 4px 12px" onclick="event.stopPropagation()">
+              ${renderDetailGroupsHTML(weekGroups, {
+                expandedGroups: cfWeekExpandedGroups,
+                expandedCategories: cfWeekExpandedCategories,
+                groupToggle: (i) => `toggleCfWeekGroup(${w.week_num}, ${i})`,
+                catToggle: (catId) => `toggleCfWeekCategory(${w.week_num}, ${JSON.stringify(catId)})`,
+                groupKey: (i) => `${w.week_num}:${i}`,
+                catKey: (catId) => `${w.week_num}:${catId}`,
+                dayFrom, dayTo,
+              })}
+            </td>
+          </tr>` : ''}`;
+        }).join('')}
+      </tbody>
+    </table>`;
 }
 
 async function loadDebts() {
