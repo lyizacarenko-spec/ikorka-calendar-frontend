@@ -1677,13 +1677,14 @@ function bankOpRowHtml(op) {
       ${op.purpose ? `<div class="bank-op-purpose">${escapeHtml(op.purpose)}</div>` : ''}
       ${isProcessed
         ? `<div class="bank-op-processed">✓ ${escapeHtml(op.category_name || 'Рознесено')}</div>`
-        : `<div style="display:flex;gap:6px;margin-top:8px;align-items:center">
+        : `<div style="display:flex;gap:6px;margin-top:8px;align-items:center;flex-wrap:wrap">
              <select class="form-input bank-op-cat-select" style="margin-top:0;flex:1" onchange="processBankOp(${op.id}, this.value, this)">
                <option value="">Обрати статтю...</option>
                ${bankCategoryOptionsHtml(null)}
              </select>
              <button class="btn btn-ghost btn-sm" onclick="sendBankOpToCash(${op.id}, this)">В касу</button>
              ${op.account_is_owner ? `<button class="btn btn-ghost btn-sm" onclick="sendBankOpToOwner(${op.id}, this)">Вивід власника</button>` : ''}
+             ${bankOpCardSelectHtml(op.id)}
            </div>`
       }
     </div>`;
@@ -1779,6 +1780,43 @@ async function sendBankOpToOwner(opId, btnEl) {
   } catch (e) {
     showToast('Помилка мережі', 'error');
     if (btnEl) btnEl.disabled = false;
+  }
+}
+
+// "Вивід на карту" — показується на всіх необроблених операціях (не тільки owner).
+// Карти беремо з уже завантаженого accounts[] (loadMeta), без окремого запиту. Якщо
+// карт немає — звичайна кнопка з тостом-підказкою замість порожнього select.
+function bankOpCardSelectHtml(opId) {
+  const cardAccounts = accounts.filter(a => a.type === 'card' && !a.is_archived);
+  if (!cardAccounts.length) {
+    return `<button class="btn btn-ghost btn-sm" onclick="showToast('Спочатку додайте карту в розділі Рахунки', 'error')">Вивід на карту</button>`;
+  }
+  return `<select class="form-input bank-op-cat-select" style="margin-top:0;width:auto" onchange="sendBankOpToCard(${opId}, this.value, this)">
+    <option value="">Вивід на карту...</option>
+    ${cardAccounts.map(a => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('')}
+  </select>`;
+}
+
+async function sendBankOpToCard(opId, cardId, selectEl) {
+  if (!cardId) return;
+  if (selectEl) selectEl.disabled = true;
+  try {
+    const r = await fetch(`${API}/api/bank-operations/${opId}/process`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({ to_card: true, card_id: cardId })
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      showToast(data.error || 'Помилка', 'error');
+      if (selectEl) selectEl.disabled = false;
+      return;
+    }
+    showToast('Переказ на карту створено ✓', 'success');
+    onBankOpProcessed(opId, null, 'Вивід на карту');
+  } catch (e) {
+    showToast('Помилка мережі', 'error');
+    if (selectEl) selectEl.disabled = false;
   }
 }
 
