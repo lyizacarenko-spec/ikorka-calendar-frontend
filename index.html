@@ -270,7 +270,20 @@ td.col-sum { z-index:5; background:var(--bg); }
 .bank-op-purpose { font-size:11px; color:var(--muted); margin-top:2px; line-height:1.3; }
 .bank-op-cat-select { margin-top:8px; font-size:12px; padding:6px 8px; }
 .bank-op-processed { margin-top:8px; font-size:12px; color:var(--green); font-weight:600; }
+.bank-op-processed.split { cursor:pointer; user-select:none; }
+.split-caret { font-size:10px; }
+.bank-op-split-details { margin-top:6px; border:1px solid var(--border2); border-radius:6px; padding:6px 8px; background:var(--bg); }
+.split-detail-row { display:flex; justify-content:space-between; gap:8px; font-size:11px; padding:3px 0; }
+.split-detail-row:not(:last-child) { border-bottom:1px solid var(--border2); }
 .empty-state-sm { padding:20px 14px; font-size:12px; color:var(--muted); text-align:center; }
+.split-row { display:flex; gap:6px; align-items:flex-start; margin-bottom:8px; }
+.split-cat-wrap { flex:1; }
+.split-cat-search { margin-bottom:4px; font-size:12px; padding:6px 8px; }
+.split-cat-select { font-size:12px; padding:6px 8px; }
+.split-amount { width:110px; font-size:12px; padding:6px 8px; flex-shrink:0; }
+.split-remove { flex-shrink:0; }
+.split-remaining { margin-top:14px; font-size:13px; font-weight:600; color:var(--red); }
+.split-remaining.zero { color:var(--green); }
 @media (max-width: 1300px) {
   .bank-ribbon { width:260px; }
   .side-panel { width:220px; }
@@ -990,6 +1003,21 @@ select.form-input { appearance:none; }
   </div>
 </div>
 
+<!-- SPLIT BANK OPERATION MODAL -->
+<div class="modal-overlay" id="splitOpModal">
+  <div class="modal" style="width:520px">
+    <div class="modal-title">Розбити операцію</div>
+    <div class="modal-sub" id="splitOpSub">—</div>
+    <div id="splitRows"></div>
+    <button class="btn btn-ghost btn-sm" onclick="addSplitRow()" style="margin-top:4px">+ Додати рядок</button>
+    <div class="split-remaining" id="splitRemaining">Залишилось розподілити: —</div>
+    <div class="modal-actions">
+      <button class="btn btn-cancel" onclick="closeModal('splitOpModal')">Скасувати</button>
+      <button class="btn btn-primary" id="splitSaveBtn" onclick="saveSplitOp()" disabled>Зберегти</button>
+    </div>
+  </div>
+</div>
+
 <!-- NOVAPAY STATEMENT MODAL -->
 <div class="modal-overlay" id="statementModal">
   <div class="modal" style="width:520px">
@@ -1676,12 +1704,16 @@ function bankOpRowHtml(op) {
       <div class="bank-op-counterparty">${escapeHtml(op.counterparty || '—')}</div>
       ${op.purpose ? `<div class="bank-op-purpose">${escapeHtml(op.purpose)}</div>` : ''}
       ${isProcessed
-        ? `<div class="bank-op-processed">✓ ${escapeHtml(op.category_name || 'Рознесено')}</div>`
+        ? (op.split_count > 0
+            ? `<div class="bank-op-processed split" onclick="toggleSplitDetails(${op.id}, this)">✓ Рознесено (${op.split_count}) <span class="split-caret">▾</span></div>
+               <div class="bank-op-split-details" id="splitDetails_${op.id}" style="display:none"></div>`
+            : `<div class="bank-op-processed">✓ ${escapeHtml(op.category_name || 'Рознесено')}</div>`)
         : `<div style="display:flex;gap:6px;margin-top:8px;align-items:center;flex-wrap:wrap">
              <select class="form-input bank-op-cat-select" style="margin-top:0;flex:1" onchange="processBankOp(${op.id}, this.value, this)">
                <option value="">Обрати статтю...</option>
                ${bankCategoryOptionsHtml(null)}
              </select>
+             <button class="btn btn-ghost btn-sm" onclick="openSplitModalById(${op.id})">Розбити</button>
              <button class="btn btn-ghost btn-sm" onclick="sendBankOpToCash(${op.id}, this)">В касу</button>
              ${op.account_is_owner ? `<button class="btn btn-ghost btn-sm" onclick="sendBankOpToOwner(${op.id}, this)">Вивід власника</button>` : ''}
              ${bankOpCardSelectHtml(op.id)}
@@ -1817,6 +1849,140 @@ async function sendBankOpToCard(opId, cardId, selectEl) {
   } catch (e) {
     showToast('Помилка мережі', 'error');
     if (selectEl) selectEl.disabled = false;
+  }
+}
+
+// ===== РОЗБИТТЯ БАНКІВСЬКОЇ ОПЕРАЦІЇ НА КІЛЬКА СТАТЕЙ =====
+// splitRows — рядки поточної відкритої модалки, {categoryId, amount} (amount — рядок з
+// інпута, парситься лише при підрахунку/збереженні). Рахуємо все в копійках
+// (Math.round(x*100)), щоб "Залишилось розподілити" не мигтіло через артефакти float
+// (0.1+0.2 і подібне) — той самий підхід, що на бекенді в /split.
+let splitOpId = null;
+let splitOpAmountCents = 0;
+let splitRows = [];
+
+function openSplitModalById(opId) {
+  const op = bankOps.find(o => o.id === opId);
+  if (op) openSplitModal(op);
+}
+
+function openSplitModal(op) {
+  splitOpId = op.id;
+  splitOpAmountCents = Math.round(parseFloat(op.amount) * 100);
+  splitRows = [{ categoryId: '', amount: '' }, { categoryId: '', amount: '' }];
+  document.getElementById('splitOpSub').textContent = `${fmtDate(op.op_date)} · −₴ ${fmt(op.amount)}${op.counterparty ? ' · ' + op.counterparty : ''}`;
+  renderSplitRows();
+  document.getElementById('splitOpModal').classList.add('show');
+}
+
+// Повний перерендер рядків — лише при додаванні/видаленні (не на кожен ввід, інакше
+// інпут суми й пошук статті губили б фокус на кожній цифрі/букві).
+function renderSplitRows() {
+  const container = document.getElementById('splitRows');
+  container.innerHTML = splitRows.map((row, idx) => `
+    <div class="split-row">
+      <div class="split-cat-wrap">
+        <input class="form-input split-cat-search" type="text" placeholder="Пошук статті..." autocomplete="off"
+          id="splitCatSearch_${idx}" oninput="filterCategoryOptions('splitCat_${idx}', 'splitCatSearch_${idx}')">
+        <select class="form-input split-cat-select" id="splitCat_${idx}" onchange="setSplitRowCategory(${idx}, this.value)">
+          <option value="">Оберіть статтю...</option>
+          ${bankCategoryOptionsHtml(row.categoryId)}
+        </select>
+      </div>
+      <input class="form-input split-amount" type="number" step="0.01" placeholder="0"
+        value="${row.amount}" oninput="setSplitRowAmount(${idx}, this.value)">
+      <button class="btn btn-ghost btn-sm split-remove" onclick="removeSplitRow(${idx})"
+        ${splitRows.length <= 1 ? 'disabled' : ''}>✕</button>
+    </div>
+  `).join('');
+  updateSplitRemaining();
+}
+
+function setSplitRowCategory(idx, value) {
+  splitRows[idx].categoryId = value;
+  updateSplitRemaining();
+}
+
+function setSplitRowAmount(idx, value) {
+  splitRows[idx].amount = value;
+  updateSplitRemaining();
+}
+
+function addSplitRow() {
+  splitRows.push({ categoryId: '', amount: '' });
+  renderSplitRows();
+}
+
+function removeSplitRow(idx) {
+  if (splitRows.length <= 1) return;
+  splitRows.splice(idx, 1);
+  renderSplitRows();
+}
+
+// Кнопка "Зберегти" активна лише коли залишок точно 0 (у копійках) і кожен рядок має
+// й статтю, і суму > 0 — інакше можна зберегти незаповнений або дірявий сплит.
+function updateSplitRemaining() {
+  const sumCents = splitRows.reduce((s, r) => s + Math.round((parseFloat(r.amount) || 0) * 100), 0);
+  const remainingCents = splitOpAmountCents - sumCents;
+  const el = document.getElementById('splitRemaining');
+  el.textContent = `Залишилось розподілити: ₴ ${fmt(remainingCents / 100)}`;
+  el.className = 'split-remaining' + (remainingCents === 0 ? ' zero' : '');
+  const rowsValid = splitRows.every(r => r.categoryId && parseFloat(r.amount) > 0);
+  document.getElementById('splitSaveBtn').disabled = !(remainingCents === 0 && rowsValid);
+}
+
+async function saveSplitOp() {
+  const btn = document.getElementById('splitSaveBtn');
+  btn.disabled = true;
+  try {
+    const parts = splitRows.map(r => ({ category_id: parseInt(r.categoryId), amount: parseFloat(r.amount) }));
+    const r = await fetch(`${API}/api/bank-operations/${splitOpId}/split`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({ parts })
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      showToast(data.error || 'Помилка', 'error');
+      btn.disabled = false;
+      return;
+    }
+    showToast('Операцію розбито ✓', 'success');
+    closeModal('splitOpModal');
+    const op = bankOps.find(o => o.id === splitOpId);
+    if (op) op.split_count = data.split_count;
+    onBankOpProcessed(splitOpId, null, `Рознесено (${data.split_count})`);
+  } catch (e) {
+    showToast('Помилка мережі', 'error');
+    btn.disabled = false;
+  }
+}
+
+// Розкриття мітки "Рознесено (N)" — деталі тягнемо лише один раз (dataset.loaded),
+// далі просто ховаємо/показуємо вже завантажений блок.
+async function toggleSplitDetails(opId, el) {
+  const details = document.getElementById(`splitDetails_${opId}`);
+  if (!details) return;
+  if (details.style.display !== 'none') {
+    details.style.display = 'none';
+    return;
+  }
+  details.style.display = 'block';
+  if (details.dataset.loaded) return;
+  details.innerHTML = '<div class="empty-state-sm">Завантаження...</div>';
+  try {
+    const r = await fetch(`${API}/api/bank-operations/${opId}/splits`, { headers: { Authorization: 'Bearer ' + token } });
+    const rows = await r.json();
+    details.innerHTML = rows.map(row => `
+      <div class="split-detail-row">
+        <span>${fmtDate(row.date)}</span>
+        <span>${escapeHtml(row.category_name || '—')}</span>
+        <span>₴ ${fmt(row.amount)}</span>
+      </div>
+    `).join('');
+    details.dataset.loaded = '1';
+  } catch (e) {
+    details.innerHTML = '<div class="empty-state-sm">Помилка завантаження</div>';
   }
 }
 
