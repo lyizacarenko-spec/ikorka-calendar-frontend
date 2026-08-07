@@ -4192,18 +4192,24 @@ async function loadExpActuality() {
     const r = await fetch(`${API}/api/bank-operations/by-date?dateFrom=${dateFrom}&dateTo=${dateTo}`, {
       headers: { Authorization: 'Bearer ' + token }
     });
-    const ops = await r.json();
+    const opsRaw = await r.json();
     if (!r.ok) {
-      content.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-title">${ops.error || 'Помилка завантаження'}</div></div>`;
+      content.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-title">${opsRaw.error || 'Помилка завантаження'}</div></div>`;
       return;
     }
+
+    // Цей екран — лише витрати. Фільтр суто фронтовий: бекенд /by-date віддає обидва
+    // знаки навмисно (може знадобитись і прихід для інших задач), тут просто не показуємо.
+    const ops = opsRaw.filter(op => op.sign === '-');
     if (!ops.length) {
       content.innerHTML = '<div class="empty-state"><div class="empty-icon">📅</div><div class="empty-title">Немає операцій за обраний період</div></div>';
       return;
     }
 
     // Групування за op_date — рядковий ключ (однакові ISO-рядки для одного дня, бекенд
-    // уже відсортував dateFrom→account_name→id, тут лише розбиваємо на групи).
+    // уже відсортував dateFrom→account_name→id, тут лише розбиваємо на групи). Порожніх
+    // груп тут по конструкції не буде — ops уже відфільтровані вище, group створюється
+    // лише коли в нього щось потрапляє.
     const groups = [];
     let curKey = null, curGroup = null;
     ops.forEach(op => {
