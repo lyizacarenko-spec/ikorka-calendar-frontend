@@ -359,6 +359,21 @@ td.col-sum { z-index:5; background:var(--bg); }
 .debt-val { font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:600; color:var(--text); }
 .debt-actions { display:flex; gap:8px; margin-top:10px; }
 
+/* EXPENSE ACTUALITY SCREEN — групи по днях (.big-card), рядок операції — .ea-row,
+   бейджі статусу — та сама кольорова мова, що .pill.plan/.debt-status-badge/.bank-op-tag. */
+.ea-day-group { margin-bottom:14px; }
+.ea-day-header { font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:8px; padding-left:2px; }
+.ea-row { padding:10px 0; border-bottom:1px solid var(--border2); }
+.ea-row:last-child { border:none; }
+.ea-row-main { display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
+.ea-account { font-size:13px; font-weight:600; }
+.ea-row-sub { font-size:12px; color:var(--muted); margin-top:2px; }
+.ea-purpose { margin-left:8px; }
+.ea-row-badges { margin-top:6px; display:flex; gap:6px; flex-wrap:wrap; }
+.ea-badge { font-size:10px; font-weight:700; padding:2px 8px; border-radius:20px; display:inline-block; }
+.ea-badge.processed { background:var(--green-bg); color:var(--green); border:1px solid var(--green-border); }
+.ea-badge.unprocessed { background:var(--amber-bg); color:var(--amber); border:1px solid var(--amber-border); }
+
 /* CASH COUNT */
 .cash-count-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:16px; }
 .denomination-card { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:12px; }
@@ -536,6 +551,7 @@ select.form-input { appearance:none; }
       <div class="nav-item" data-screen="currency"><span class="icon">💱</span> Валютний резерв</div>
      <div class="nav-item" data-screen="summary"><span class="icon">📋</span> Тижневий звіт</div>
       <div class="nav-item" data-screen="analytics"><span class="icon">📈</span> Аналітика по ФОП</div>
+      <div class="nav-item" data-screen="expactuality"><span class="icon">📅</span> Актуальність витрат</div>
       <a class="nav-item" href="https://lyizacarenko-spec.github.io/schedule/?view=finance" target="_blank" style="text-decoration:none;color:inherit"><span class="icon">💰</span> Фінанси ЗП</a>
       <div class="nav-group">Система</div>
       <div class="nav-item" data-screen="autopay"><span class="icon">🔁</span> Автоплатежі</div>
@@ -891,6 +907,49 @@ select.form-input { appearance:none; }
             </tfoot>
           </table>
         </div>
+      </div>
+    </div>
+
+    <!-- EXPENSE ACTUALITY SCREEN -->
+    <div class="screen" id="screen-expactuality">
+      <div class="screen-body">
+        <div class="section-header">
+          <div>
+            <div class="section-title">Актуальність витрат</div>
+            <div class="section-sub" id="eaSub">—</div>
+          </div>
+        </div>
+        <div class="status-pills" id="eaModeGroup" style="margin-bottom:12px">
+          <div class="pill filter active" data-mode="day" onclick="setEaMode('day')">Один день</div>
+          <div class="pill filter" data-mode="range" onclick="setEaMode('range')">Період</div>
+        </div>
+        <div class="form-row" id="eaDayBlock" style="max-width:220px">
+          <div class="form-group">
+            <label class="form-label">Дата</label>
+            <div class="form-input dp-trigger" onclick="openDatePicker('eaDate', this, loadExpActuality)">
+              <span id="eaDateText">—</span><span class="dp-icon">📅</span>
+            </div>
+            <input type="hidden" id="eaDate">
+          </div>
+        </div>
+        <div class="form-row" id="eaRangeBlock" style="max-width:420px;display:none">
+          <div class="form-group">
+            <label class="form-label">З</label>
+            <div class="form-input dp-trigger" onclick="openDatePicker('eaFrom', this, loadExpActuality)">
+              <span id="eaFromText">—</span><span class="dp-icon">📅</span>
+            </div>
+            <input type="hidden" id="eaFrom">
+          </div>
+          <div class="form-group">
+            <label class="form-label">По</label>
+            <div class="form-input dp-trigger" onclick="openDatePicker('eaTo', this, loadExpActuality)">
+              <span id="eaToText">—</span><span class="dp-icon">📅</span>
+            </div>
+            <input type="hidden" id="eaTo">
+          </div>
+        </div>
+        <button class="btn btn-primary" style="margin-bottom:16px" onclick="loadExpActuality()">Показати</button>
+        <div id="eaContent"><div class="loader"><div class="spinner"></div></div></div>
       </div>
     </div>
 
@@ -3200,10 +3259,10 @@ function showScreen(name, el) {
   document.getElementById('screen-' + name).classList.add('active');
   if (el) el.classList.add('active');
   
-  const titles = { calendar:'Платіжний календар', cashflow:'Кеш-флоу', accounts:'Рахунки та ФОП', transfers:'Переводи', withdrawals:'Вивід власника', debts:'Борги', cashcount:'Купюрниця', currency:'Валютний резерв', summary:'Тижневий звіт', analytics:'Аналітика по ФОП', autopay:'Автоплатежі', expcats:'Статті витрат', users:'Користувачі' };
+  const titles = { calendar:'Платіжний календар', cashflow:'Кеш-флоу', accounts:'Рахунки та ФОП', transfers:'Переводи', withdrawals:'Вивід власника', debts:'Борги', cashcount:'Купюрниця', currency:'Валютний резерв', summary:'Тижневий звіт', analytics:'Аналітика по ФОП', expactuality:'Актуальність витрат', autopay:'Автоплатежі', expcats:'Статті витрат', users:'Користувачі' };
   document.getElementById('topbarTitle').textContent = titles[name] || name;
 
-  const hidePeriod = ['accounts','debts','cashcount','currency','summary','analytics','autopay','expcats','users','transfers'];
+  const hidePeriod = ['accounts','debts','cashcount','currency','summary','analytics','expactuality','autopay','expcats','users','transfers'];
   document.getElementById('periodCtrl').style.display = hidePeriod.includes(name) ? 'none' : 'flex';
 
   if (name === 'accounts') loadAccounts();
@@ -3212,6 +3271,7 @@ function showScreen(name, el) {
   else if (name === 'currency') loadCurrencyReserve();
   else if (name === 'summary') loadSummary();
   else if (name === 'analytics') loadAnalyticsScreen();
+  else if (name === 'expactuality') loadExpActualityScreen();
   else if (name === 'autopay') loadAutopay();
   else if (name === 'expcats') loadExpCats();
   else if (name === 'withdrawals') loadWithdrawals();
@@ -4076,6 +4136,121 @@ async function loadAnalytics() {
       if (row) row.innerHTML = `<td>${acc.name}</td><td colspan="5" style="color:var(--red);font-family:'Inter',sans-serif">Помилка з'єднання</td>`;
     }
   }
+}
+
+// ============ АКТУАЛЬНІСТЬ ВИТРАТ (bank_operations по всіх ФОП за період) ============
+let eaMode = 'day';
+
+function loadExpActualityScreen() {
+  const dayEmpty = !document.getElementById('eaDate').value;
+  const rangeEmpty = !document.getElementById('eaFrom').value;
+  if (eaMode === 'day' && dayEmpty) {
+    const today = toISODate(new Date());
+    document.getElementById('eaDate').value = today;
+    updateFieldDisplay('eaDate');
+  } else if (eaMode === 'range' && rangeEmpty) {
+    const today = toISODate(new Date());
+    document.getElementById('eaFrom').value = today;
+    document.getElementById('eaTo').value = today;
+    updateFieldDisplay('eaFrom');
+    updateFieldDisplay('eaTo');
+  }
+  loadExpActuality();
+}
+
+// Скоуп на #eaModeGroup .pill — не на весь #screen-expactuality, той самий підхід,
+// що й для інших pill-груп (див. CLAUDE.md, пастка №2).
+function setEaMode(mode) {
+  eaMode = mode;
+  document.querySelectorAll('#eaModeGroup .pill').forEach(p => p.classList.toggle('active', p.dataset.mode === mode));
+  document.getElementById('eaDayBlock').style.display = mode === 'day' ? '' : 'none';
+  document.getElementById('eaRangeBlock').style.display = mode === 'range' ? '' : 'none';
+  loadExpActualityScreen();
+}
+
+// "3 лип" — день+короткий місяць БЕЗ року (fmtDate() з роком тут задовгий для
+// заголовка групи, тому окремий маленький хелпер, а не переробка спільної fmtDate).
+function eaDayHeader(iso) {
+  return new Date(iso).toLocaleDateString('uk-UA', { day: 'numeric', month: 'short' });
+}
+
+async function loadExpActuality() {
+  const content = document.getElementById('eaContent');
+  let dateFrom, dateTo;
+  if (eaMode === 'day') {
+    dateFrom = dateTo = document.getElementById('eaDate').value;
+  } else {
+    dateFrom = document.getElementById('eaFrom').value;
+    dateTo = document.getElementById('eaTo').value;
+  }
+  if (!dateFrom || !dateTo) return;
+
+  document.getElementById('eaSub').textContent = dateFrom === dateTo ? fmtDate(dateFrom) : `${fmtDate(dateFrom)} — ${fmtDate(dateTo)}`;
+  content.innerHTML = '<div class="loader"><div class="spinner"></div></div>';
+
+  try {
+    const r = await fetch(`${API}/api/bank-operations/by-date?dateFrom=${dateFrom}&dateTo=${dateTo}`, {
+      headers: { Authorization: 'Bearer ' + token }
+    });
+    const ops = await r.json();
+    if (!r.ok) {
+      content.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-title">${ops.error || 'Помилка завантаження'}</div></div>`;
+      return;
+    }
+    if (!ops.length) {
+      content.innerHTML = '<div class="empty-state"><div class="empty-icon">📅</div><div class="empty-title">Немає операцій за обраний період</div></div>';
+      return;
+    }
+
+    // Групування за op_date — рядковий ключ (однакові ISO-рядки для одного дня, бекенд
+    // уже відсортував dateFrom→account_name→id, тут лише розбиваємо на групи).
+    const groups = [];
+    let curKey = null, curGroup = null;
+    ops.forEach(op => {
+      if (op.op_date !== curKey) {
+        curKey = op.op_date;
+        curGroup = { op_date: op.op_date, ops: [] };
+        groups.push(curGroup);
+      }
+      curGroup.ops.push(op);
+    });
+
+    content.innerHTML = groups.map(g => `
+      <div class="ea-day-group">
+        <div class="ea-day-header">${eaDayHeader(g.op_date)}</div>
+        <div class="big-card">
+          ${g.ops.map(eaRowHtml).join('')}
+        </div>
+      </div>`).join('');
+  } catch (e) {
+    content.innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><div class="empty-title">Помилка з\'єднання</div></div>';
+  }
+}
+
+// Сума зі знаком — той самий патерн (клас .bank-op-amount, signChar), що в bankOpRowHtml
+// (стрічка банк-операцій), щоб форматування збігалось між екранами.
+function eaRowHtml(op) {
+  const isPos = op.sign === '+';
+  const amtClass = isPos ? 'pos' : (op.sign === '-' ? 'neg' : '');
+  const signChar = isPos ? '+' : (op.sign === '-' ? '−' : '');
+
+  const badges = [];
+  if (op.is_processed && op.category_label) badges.push(`<span class="ea-badge processed">✓ ${escapeHtml(op.category_label)}</span>`);
+  if (op.is_self_transfer) badges.push(`<span class="bank-op-tag">Переказ між своїми</span>`);
+  if (!op.is_processed) badges.push(`<span class="ea-badge unprocessed">Необроблено</span>`);
+
+  return `
+    <div class="ea-row">
+      <div class="ea-row-main">
+        <span class="ea-account">${escapeHtml(op.account_name)}</span>
+        <span class="bank-op-amount ${amtClass}">${signChar}₴ ${fmt(op.amount)}</span>
+      </div>
+      <div class="ea-row-sub">
+        <span>${escapeHtml(op.counterparty || '—')}</span>
+        ${op.purpose ? `<span class="ea-purpose">${escapeHtml(op.purpose)}</span>` : ''}
+      </div>
+      <div class="ea-row-badges">${badges.join('')}</div>
+    </div>`;
 }
 
 // Назва історична — роут /api/novapay/sync диспетчеризується на бекенді за api_type
