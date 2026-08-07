@@ -142,7 +142,10 @@ body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); 
   border-radius:8px; padding:8px 14px; min-width:140px; flex-shrink:0;
 }
 .bal-card.danger { border-color:var(--red); background:var(--red-bg); }
-.bal-card.total { border-color:var(--blue-border); background:var(--blue-bg); }
+/* sticky зліва, щоб лишалась видимою при горизонтальному скролі стрічки;
+   z-index — над картками ФОП, що прокручуються під нею; непрозорий background
+   (var(--blue-bg) з темою) — щоб ті картки не просвічували крізь неї. */
+.bal-card.total { border-color:var(--blue-border); background:var(--blue-bg); position:sticky; left:0; z-index:2; }
 .bal-label { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:3px; }
 .bal-amount { font-family:'JetBrains Mono',monospace; font-size:15px; font-weight:600; }
 .bal-amount.pos { color:var(--green); }
@@ -1570,7 +1573,16 @@ async function loadBalances() {
     const data = await r.json();
     accounts = data.accounts || [];
     const strip = document.getElementById('balanceStrip');
-    strip.innerHTML = '';
+    // "Разом компанія" — завжди перша картка (sticky зліва, .bal-card.total у CSS),
+    // тому будуємо її ДО циклу по рахунках і кладемо в strip.innerHTML першою,
+    // а не через += в кінці, як було раніше.
+    const total = data.total || 0;
+    strip.innerHTML = `
+      <div class="bal-card total">
+        <div class="bal-label">Разом компанія</div>
+        <div class="bal-amount blue">₴ ${fmt(total)}</div>
+        <div class="bal-sub">Всі рахунки</div>
+      </div>`;
     let hasGap = false;
     accounts.forEach(a => {
       const bal = parseFloat(a.current_balance || 0);
@@ -1583,14 +1595,7 @@ async function loadBalances() {
           <div class="bal-sub">${a.bank || (a.type === 'cash' ? 'Готівка' : '—')}</div>
         </div>`;
     });
-    const total = data.total || 0;
-    strip.innerHTML += `
-      <div class="bal-card total">
-        <div class="bal-label">Разом компанія</div>
-        <div class="bal-amount blue">₴ ${fmt(total)}</div>
-        <div class="bal-sub">Всі рахунки</div>
-      </div>`;
-    
+
     document.getElementById('fopCount').textContent = `${accounts.length + 1} рахунків`;
     if (hasGap) {
       document.getElementById('gapAlert').style.display = 'block';
