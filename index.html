@@ -874,14 +874,14 @@ select.form-input { appearance:none; }
         <div class="form-row" style="max-width:420px">
           <div class="form-group">
             <label class="form-label">З</label>
-            <div class="form-input dp-trigger" onclick="openDatePicker('anFrom', this, loadAnalytics)">
+            <div class="form-input dp-trigger" onclick="openDatePicker('anFrom', this, loadAnalyticsDebounced)">
               <span id="anFromText">—</span><span class="dp-icon">📅</span>
             </div>
             <input type="hidden" id="anFrom">
           </div>
           <div class="form-group">
             <label class="form-label">По</label>
-            <div class="form-input dp-trigger" onclick="openDatePicker('anTo', this, loadAnalytics)">
+            <div class="form-input dp-trigger" onclick="openDatePicker('anTo', this, loadAnalyticsDebounced)">
               <span id="anToText">—</span><span class="dp-icon">📅</span>
             </div>
             <input type="hidden" id="anTo">
@@ -3998,6 +3998,17 @@ async function loadStatement() {
 }
 
 let analyticsAbortController = null;
+
+// Debounce саме для date-picker'ів (швидка зміна "З"/"По" поспіль) — не для кнопок
+// "Тиждень"/"Місяць" чи початкового відкриття екрана, ті лишились на прямий
+// loadAnalytics(): одноразова свідома дія, зайва затримка там тільки шкодить UX.
+// Бекенд-черга (novapayQueue в services/novapay.js) — головний захист від паралельних
+// проходів по всіх акаунтах, цей debounce лише знижує, як часто вони взагалі стартують.
+let analyticsDebounceTimer = null;
+function loadAnalyticsDebounced() {
+  clearTimeout(analyticsDebounceTimer);
+  analyticsDebounceTimer = setTimeout(loadAnalytics, 1500);
+}
 
 function loadAnalyticsScreen() {
   if (!document.getElementById('anFrom').value) {
