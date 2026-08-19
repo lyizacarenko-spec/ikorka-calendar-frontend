@@ -874,19 +874,20 @@ select.form-input { appearance:none; }
         <div class="form-row" style="max-width:420px">
           <div class="form-group">
             <label class="form-label">З</label>
-            <div class="form-input dp-trigger" onclick="openDatePicker('anFrom', this, loadAnalyticsDebounced)">
+            <div class="form-input dp-trigger" onclick="openDatePicker('anFrom', this, onAnalyticsDateChanged)">
               <span id="anFromText">—</span><span class="dp-icon">📅</span>
             </div>
             <input type="hidden" id="anFrom">
           </div>
           <div class="form-group">
             <label class="form-label">По</label>
-            <div class="form-input dp-trigger" onclick="openDatePicker('anTo', this, loadAnalyticsDebounced)">
+            <div class="form-input dp-trigger" onclick="openDatePicker('anTo', this, onAnalyticsDateChanged)">
               <span id="anToText">—</span><span class="dp-icon">📅</span>
             </div>
             <input type="hidden" id="anTo">
           </div>
         </div>
+        <button class="btn btn-primary" id="analyticsLoadBtn" style="margin-bottom:16px" onclick="loadAnalytics()">▶️ Завантажити</button>
         <div style="overflow-x:auto">
           <table class="analytics-table">
             <thead>
@@ -3998,23 +3999,18 @@ async function loadStatement() {
 }
 
 let analyticsAbortController = null;
+let analyticsLoadInProgress = false;
 
-// Debounce саме для date-picker'ів (швидка зміна "З"/"По" поспіль) — не для кнопок
-// "Тиждень"/"Місяць" чи початкового відкриття екрана, ті лишились на прямий
-// loadAnalytics(): одноразова свідома дія, зайва затримка там тільки шкодить UX.
-// Бекенд-черга (novapayQueue в services/novapay.js) — головний захист від паралельних
-// проходів по всіх акаунтах, цей debounce лише знижує, як часто вони взагалі стартують.
-let analyticsDebounceTimer = null;
-function loadAnalyticsDebounced() {
-  clearTimeout(analyticsDebounceTimer);
-  analyticsDebounceTimer = setTimeout(loadAnalytics, 1500);
-}
-
+// Прохід по всіх ФОП довгий (десятки секунд на акаунт через чергу до NovaPay,
+// див. services/novapay.js) — тому єдина точка запуску завантаження це явний клік
+// на "Завантажити" (loadAnalytics). Ні відкриття екрана, ні вибір періоду/дат самі
+// по собі більше НЕ вантажать дані — щоб просто зайти подивитись не означало
+// випадково запустити 10-20-хвилинний прохід по банку.
 function loadAnalyticsScreen() {
   if (!document.getElementById('anFrom').value) {
     setAnalyticsPeriod('week');
   } else {
-    loadAnalytics();
+    onAnalyticsDateChanged();
   }
 }
 
@@ -4031,7 +4027,28 @@ function setAnalyticsPeriod(kind) {
   document.getElementById('anTo').value = toISODate(to);
   updateFieldDisplay('anFrom');
   updateFieldDisplay('anTo');
-  loadAnalytics();
+  onAnalyticsDateChanged();
+}
+
+// Спільний колбек для кнопок "Тиждень"/"Місяць" і обох date-picker'ів: оновлює
+// підказку періоду й скидає таблицю в empty-state (стара виписка — за інший
+// період), без автозапуску завантаження. Якщо прохід уже йде — скасовує його
+// клієнтський fetch (сам бекенд-прохід у черзі це не зупиняє, лише UI).
+function onAnalyticsDateChanged() {
+  if (analyticsAbortController) analyticsAbortController.abort();
+  const from = document.getElementById('anFrom').value;
+  const to = document.getElementById('anTo').value;
+  document.getElementById('analyticsSub').textContent = from && to ? `${from} — ${to}` : '—';
+  setAnalyticsTotals({ income: 0, expense: 0, self: 0, unknown: 0, unknownCount: 0, balance: 0, opening: 0, openingMissing: false });
+  renderAnalyticsEmptyState();
+}
+
+// Лівий, а не центрований текст навмисно: таблиця має min-width:640px і в вузькій
+// колонці йде горизонтальний скрол (.analytics-table в overflow-x:auto) — center
+// в такому разі виїжджає за видиму область і текст візуально обрізається.
+function renderAnalyticsEmptyState() {
+  document.getElementById('analyticsBody').innerHTML =
+    '<tr><td colspan="6" style="text-align:left;color:var(--muted);padding:24px 10px">📈 Оберіть період і натисніть «Завантажити»</td></tr>';
 }
 
 // Різниця "очікуваний − фактичний" вихідний залишок, або null якщо перевірити нема з чого
@@ -4062,7 +4079,11 @@ function setAnalyticsTotals(t) {
 
 // Виписка по кожному ФОП займає ~30с на NovaPay, тому вантажимо рядки по черзі
 // й одразу показуємо кожен готовий — паралельно екран висів би хвилину мовчки.
+// Запускається ВИНЯТКОВО кліком на "Завантажити" (analyticsLoadBtn) — кнопка на
+// час проходу дизейблиться й показує прогрес "Завантажую X/N", щоб було видно,
+// що це довга дія, а не миттєвий рефреш.
 async function loadAnalytics() {
+  if (analyticsLoadInProgress) return;
   if (analyticsAbortController) analyticsAbortController.abort();
   const controller = new AbortController();
   analyticsAbortController = controller;
@@ -4093,59 +4114,70 @@ async function loadAnalytics() {
     </tr>`).join('');
 
   const totals = { income: 0, expense: 0, self: 0, unknown: 0, unknownCount: 0, balance: 0, opening: 0, openingMissing: false };
+  const btn = document.getElementById('analyticsLoadBtn');
 
-  for (const acc of bankAccounts) {
-    if (signal.aborted) return;
-    const row = document.getElementById(`anRow-${acc.id}`);
-    try {
-      const r = await fetch(`${API}/api/novapay/extract/${acc.id}?from=${from}&to=${to}`, {
-        headers: { Authorization: 'Bearer ' + token }, signal
-      });
-      const data = await r.json();
+  analyticsLoadInProgress = true;
+  btn.disabled = true;
+  try {
+    for (let i = 0; i < bankAccounts.length; i++) {
       if (signal.aborted) return;
+      const acc = bankAccounts[i];
+      btn.textContent = `Завантажую... ${i + 1}/${bankAccounts.length}`;
+      const row = document.getElementById(`anRow-${acc.id}`);
+      try {
+        const r = await fetch(`${API}/api/novapay/extract/${acc.id}?from=${from}&to=${to}`, {
+          headers: { Authorization: 'Bearer ' + token }, signal
+        });
+        const data = await r.json();
+        if (signal.aborted) return;
 
-      if (!r.ok || !data.success) {
-        if (row) row.innerHTML = `<td>${acc.name}</td><td colspan="5" style="color:var(--red);font-family:'Inter',sans-serif">${data.error || 'Помилка'}</td>`;
-        continue;
+        if (!r.ok || !data.success) {
+          if (row) row.innerHTML = `<td>${acc.name}</td><td colspan="5" style="color:var(--red);font-family:'Inter',sans-serif">${data.error || 'Помилка'}</td>`;
+          continue;
+        }
+
+        let income = 0, expense = 0, self = 0, unknown = 0, unknownCount = 0;
+        for (const op of (data.operations || [])) {
+          const amt = Math.abs(op.amount || 0);
+          if (op.isSelfTransfer) self += amt;
+          else if (op.sign === '+') income += amt;
+          else if (op.sign === '-') expense += amt;
+          else { unknown += amt; unknownCount++; }
+        }
+        const balance = parseFloat(data.balance || 0);
+        const opening = data.openingBalance === null || data.openingBalance === undefined ? null : parseFloat(data.openingBalance);
+        // ПриватБанк повертає готові обороти по днях (creditTurnover/debitTurnover) — надійніше,
+        // ніж підсумовувати операції клієнтською стороною. NovaPay такого не дає — рахуємо самі.
+        const credit = data.creditTurnover !== undefined ? parseFloat(data.creditTurnover) : income;
+        const debit = data.debitTurnover !== undefined ? parseFloat(data.debitTurnover) : (expense + self);
+
+        totals.income += income;
+        totals.expense += expense;
+        totals.self += self;
+        totals.unknown += unknown;
+        totals.unknownCount += unknownCount;
+        totals.balance += balance;
+        if (opening === null) totals.openingMissing = true; else totals.opening += opening;
+        setAnalyticsTotals(totals);
+
+        const diff = reconcileDiff(opening, credit, debit, balance);
+
+        if (row) row.innerHTML = `
+          <td>${acc.name}</td>
+          <td>₴ ${fmt(credit)}</td>
+          <td>₴ ${fmt(debit)}</td>
+          <td style="color:var(--muted)">₴ ${fmt(self)}</td>
+          <td>${balanceCellHTML(balance, diff)}</td>
+          <td style="${unknownCount ? 'color:var(--amber)' : 'color:var(--muted)'}">${unknownCount ? `${unknownCount} · ₴ ${fmt(unknown)}` : '—'}</td>`;
+      } catch(e) {
+        if (e.name === 'AbortError') return;
+        if (row) row.innerHTML = `<td>${acc.name}</td><td colspan="5" style="color:var(--red);font-family:'Inter',sans-serif">Помилка з'єднання</td>`;
       }
-
-      let income = 0, expense = 0, self = 0, unknown = 0, unknownCount = 0;
-      for (const op of (data.operations || [])) {
-        const amt = Math.abs(op.amount || 0);
-        if (op.isSelfTransfer) self += amt;
-        else if (op.sign === '+') income += amt;
-        else if (op.sign === '-') expense += amt;
-        else { unknown += amt; unknownCount++; }
-      }
-      const balance = parseFloat(data.balance || 0);
-      const opening = data.openingBalance === null || data.openingBalance === undefined ? null : parseFloat(data.openingBalance);
-      // ПриватБанк повертає готові обороти по днях (creditTurnover/debitTurnover) — надійніше,
-      // ніж підсумовувати операції клієнтською стороною. NovaPay такого не дає — рахуємо самі.
-      const credit = data.creditTurnover !== undefined ? parseFloat(data.creditTurnover) : income;
-      const debit = data.debitTurnover !== undefined ? parseFloat(data.debitTurnover) : (expense + self);
-
-      totals.income += income;
-      totals.expense += expense;
-      totals.self += self;
-      totals.unknown += unknown;
-      totals.unknownCount += unknownCount;
-      totals.balance += balance;
-      if (opening === null) totals.openingMissing = true; else totals.opening += opening;
-      setAnalyticsTotals(totals);
-
-      const diff = reconcileDiff(opening, credit, debit, balance);
-
-      if (row) row.innerHTML = `
-        <td>${acc.name}</td>
-        <td>₴ ${fmt(credit)}</td>
-        <td>₴ ${fmt(debit)}</td>
-        <td style="color:var(--muted)">₴ ${fmt(self)}</td>
-        <td>${balanceCellHTML(balance, diff)}</td>
-        <td style="${unknownCount ? 'color:var(--amber)' : 'color:var(--muted)'}">${unknownCount ? `${unknownCount} · ₴ ${fmt(unknown)}` : '—'}</td>`;
-    } catch(e) {
-      if (e.name === 'AbortError') return;
-      if (row) row.innerHTML = `<td>${acc.name}</td><td colspan="5" style="color:var(--red);font-family:'Inter',sans-serif">Помилка з'єднання</td>`;
     }
+  } finally {
+    analyticsLoadInProgress = false;
+    btn.disabled = false;
+    btn.textContent = '▶️ Завантажити';
   }
 }
 
