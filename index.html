@@ -1039,9 +1039,10 @@ select.form-input { appearance:none; }
       </div>
       <div class="form-group">
         <label class="form-label">Дата</label>
-        <input class="form-input" type="date" id="txDate">
+        <input class="form-input" type="date" id="txDate" onchange="refreshDirectionUI()">
       </div>
     </div>
+    <div id="txDirectionContainer"></div>
     <div class="form-group">
       <label class="form-label">Рахунок / ФОП</label>
       <select class="form-input" id="txAccount">
@@ -1775,7 +1776,7 @@ function bankOpRowHtml(op) {
                <div class="bank-op-split-details" id="splitDetails_${op.id}" style="display:none"></div>`
             : `<div class="bank-op-processed">✓ ${escapeHtml(op.category_name || 'Рознесено')}</div>`)
         : `<div style="display:flex;gap:6px;margin-top:8px;align-items:center;flex-wrap:wrap">
-             <select class="form-input bank-op-cat-select" style="margin-top:0;flex:1" onchange="processBankOp(${op.id}, this.value, this)">
+             <select class="form-input bank-op-cat-select" id="bankOpCatSelect_${op.id}" style="margin-top:0;flex:1" onchange="onBankOpCategoryChange(${op.id}, this.value)">
                <option value="">Обрати статтю...</option>
                ${bankCategoryOptionsHtml(null)}
              </select>
@@ -1783,9 +1784,39 @@ function bankOpRowHtml(op) {
              <button class="btn btn-ghost btn-sm" onclick="sendBankOpToCash(${op.id}, this)">В касу</button>
              ${op.account_is_owner ? `<button class="btn btn-ghost btn-sm" onclick="sendBankOpToOwner(${op.id}, this)">Вивід власника</button>` : ''}
              ${bankOpCardSelectHtml(op.id)}
-           </div>`
+           </div>
+           <div id="bankOpDirArea_${op.id}" style="width:100%"></div>`
       }
     </div>`;
+}
+
+// Категорія обрана в інлайн-стрічці "Банківські операції" — якщо вона залочена
+// (Маркетинг/Товар/Коробки), напрямок уже відомий, шлемо одразу, як і раніше (без
+// зайвого кліку). Інакше показуємо пікер + кнопку підтвердження ПІД рядком — сам
+// /process не стріляє, поки людина свідомо не обере напрямок і не підтвердить.
+async function onBankOpCategoryChange(opId, categoryId) {
+  const area = document.getElementById(`bankOpDirArea_${opId}`);
+  const selectEl = document.getElementById(`bankOpCatSelect_${opId}`);
+  if (!categoryId) { area.innerHTML = ''; return; }
+
+  const cat = categories.find(c => String(c.id) === String(categoryId));
+  if (cat && cat.direction_lock) {
+    area.innerHTML = '';
+    processBankOp(opId, categoryId, selectEl);
+    return;
+  }
+
+  const op = bankOps.find(o => o.id === opId);
+  const opDate = op ? new Date(op.op_date) : new Date();
+  const rev = await fetchRevenueForMonth(opDate.getFullYear(), opDate.getMonth() + 1);
+  const prefix = `bankOpDir_${opId}`;
+  area.innerHTML = renderDirectionPicker(prefix, '', rev.gb, rev.hb) +
+    `<button class="btn btn-primary btn-sm" style="margin-top:6px" onclick="confirmBankOpProcess(${opId}, ${categoryId})">✓ Підтвердити</button>`;
+}
+
+function confirmBankOpProcess(opId, categoryId) {
+  const direction = getDirectionPick(`bankOpDir_${opId}`);
+  processBankOp(opId, categoryId, document.getElementById(`bankOpCatSelect_${opId}`), direction);
 }
 
 // Спільна частина після успішного /process — і для вибору статті (expense/income),
@@ -1810,14 +1841,14 @@ function onBankOpProcessed(opId, categoryId, label) {
   loadBalances();
 }
 
-async function processBankOp(opId, categoryId, selectEl) {
+async function processBankOp(opId, categoryId, selectEl, direction) {
   if (!categoryId) return;
   if (selectEl) selectEl.disabled = true;
   try {
     const r = await fetch(`${API}/api/bank-operations/${opId}/process`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-      body: JSON.stringify({ category_id: categoryId })
+      body: JSON.stringify({ category_id: categoryId, direction })
     });
     const data = await r.json();
     if (!r.ok) {
@@ -1926,26 +1957,39 @@ async function sendBankOpToCard(opId, cardId, selectEl) {
 let splitOpId = null;
 let splitOpAmountCents = 0;
 let splitRows = [];
+let splitRevenue = { gb: null, hb: null }; // оборот місяця ОПЕРАЦІЇ (один на всю модалку —
+                                             // усі рядки спліту завжди тієї самої дати op_date)
 
 function openSplitModalById(opId) {
   const op = bankOps.find(o => o.id === opId);
   if (op) openSplitModal(op);
 }
 
-function openSplitModal(op) {
+async function openSplitModal(op) {
   splitOpId = op.id;
   splitOpAmountCents = Math.round(parseFloat(op.amount) * 100);
-  splitRows = [{ categoryId: '', amount: '' }, { categoryId: '', amount: '' }];
+  splitRows = [{ categoryId: '', amount: '', direction: '' }, { categoryId: '', amount: '', direction: '' }];
   document.getElementById('splitOpSub').textContent = `${fmtDate(op.op_date)} · −₴ ${fmt(op.amount)}${op.counterparty ? ' · ' + op.counterparty : ''}`;
+  const d = new Date(op.op_date);
+  splitRevenue = await fetchRevenueForMonth(d.getFullYear(), d.getMonth() + 1);
   renderSplitRows();
   document.getElementById('splitOpModal').classList.add('show');
 }
 
-// Повний перерендер рядків — лише при додаванні/видаленні (не на кожен ввід, інакше
-// інпут суми й пошук статті губили б фокус на кожній цифрі/букві).
+// Повний перерендер рядків — при додаванні/видаленні рядка, і при зміні категорії
+// (там теж потрібен повний рендер: пікер/лок-нотатка напрямку залежать від нової
+// категорії) — не на кожен ввід суми/пошуку, інакше інпут губив би фокус на кожній
+// цифрі/букві.
 function renderSplitRows() {
   const container = document.getElementById('splitRows');
-  container.innerHTML = splitRows.map((row, idx) => `
+  container.innerHTML = splitRows.map((row, idx) => {
+    const cat = categories.find(c => String(c.id) === String(row.categoryId));
+    const prefix = `splitDir_${idx}`;
+    const directionHtml = !row.categoryId ? '' :
+      (cat && cat.direction_lock
+        ? renderDirectionLockedNote(cat.direction_lock, prefix)
+        : renderDirectionPicker(prefix, row.direction || '', splitRevenue.gb, splitRevenue.hb, `setSplitRowDirection(${idx}, '%v%')`));
+    return `
     <div class="split-row">
       <div class="split-cat-wrap">
         <input class="form-input split-cat-search" type="text" placeholder="Пошук статті..." autocomplete="off"
@@ -1960,13 +2004,19 @@ function renderSplitRows() {
       <button class="btn btn-ghost btn-sm split-remove" onclick="removeSplitRow(${idx})"
         ${splitRows.length <= 1 ? 'disabled' : ''}>✕</button>
     </div>
-  `).join('');
+    ${directionHtml}`;
+  }).join('');
   updateSplitRemaining();
 }
 
 function setSplitRowCategory(idx, value) {
   splitRows[idx].categoryId = value;
-  updateSplitRemaining();
+  splitRows[idx].direction = ''; // нова категорія — інший можливий лок, скидаємо вибір
+  renderSplitRows();
+}
+
+function setSplitRowDirection(idx, value) {
+  splitRows[idx].direction = value;
 }
 
 function setSplitRowAmount(idx, value) {
@@ -2001,7 +2051,7 @@ async function saveSplitOp() {
   const btn = document.getElementById('splitSaveBtn');
   btn.disabled = true;
   try {
-    const parts = splitRows.map(r => ({ category_id: parseInt(r.categoryId), amount: parseFloat(r.amount) }));
+    const parts = splitRows.map(r => ({ category_id: parseInt(r.categoryId), amount: parseFloat(r.amount), direction: r.direction || '' }));
     const r = await fetch(`${API}/api/bank-operations/${splitOpId}/split`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
@@ -2211,7 +2261,7 @@ let cfWeekExpandedGroups = new Set(); // ключі `${week_num}:${i}` — не�
 let cfWeekExpandedCategories = new Set(); // ключі `${week_num}:${category_id}`
 
 let cfRevenues = { gb: null, hb: null };
-let cfExpensesPaid = { gb: 0, hb: 0, common: 0, all: 0 };
+let cfExpensesPaid = { gb: 0, hb: 0, all: 0 };
 
 async function loadCashflow() {
   try {
@@ -2227,7 +2277,7 @@ async function loadCashflow() {
     ]);
     const data = await r.json();
     cfRevenues = revR.ok ? await revR.json() : { gb: null, hb: null };
-    cfExpensesPaid = data.expenses_paid || { gb: 0, hb: 0, common: 0, all: 0 };
+    cfExpensesPaid = data.expenses_paid || { gb: 0, hb: 0, all: 0 };
     cfDetailGroups = data.expenses?.detail || [];
     cfExpandedGroups = new Set(); // за замовчуванням всі групи згорнуті при кожному завантаженні
     cfExpandedCategories = new Set();
@@ -2321,7 +2371,6 @@ function renderRevenueBlock() {
       <div class="cf-row"><span class="cf-lbl">Загальний оборот</span><span class="cf-val pos">₴ ${fmt(total)}</span></div>
       <div class="cf-row"><span class="cf-lbl">% витрат ГБ</span><span class="cf-val">${pctOf(cfExpensesPaid.gb, gb)}</span></div>
       <div class="cf-row"><span class="cf-lbl">% витрат ХБ+відмови</span><span class="cf-val">${pctOf(cfExpensesPaid.hb, hb)}</span></div>
-      <div class="cf-row"><span class="cf-lbl">% загальних витрат</span><span class="cf-val">${pctOf(cfExpensesPaid.common, total)}</span></div>
       <div class="cf-total-row"><span class="cf-total-lbl">Загальний % витрат</span><span class="cf-total-val">${pctOf(cfExpensesPaid.all, total)}</span></div>
     </div>`;
 }
@@ -2340,11 +2389,84 @@ async function saveRevenue(direction, value) {
       showToast('Оборот збережено ✓', 'success');
       const block = document.getElementById('cfRevenueBlock');
       if (block) block.outerHTML = renderRevenueBlock();
+      revenueCache.delete(`${currentYear}-${currentMonth}`); // підказка "% співвідношення" мала б показати нове значення
     } else {
       const e = await r.json();
       showToast(e.error || 'Помилка', 'error');
     }
   } catch(e) { showToast('Помилка мережі', 'error'); }
+}
+
+// ============ НАПРЯМОК ВИТРАТИ (ГБ/ХБ/% співвідношення/Не прив'язано) ============
+// Спільний пікер для трьох місць, де створюється expense-транзакція: модалка платежу
+// (txDirection), інлайн-рядок банківської операції (bankOpDir_N) і рядок спліт-модалки
+// (splitDir_N) — кожен інстанс має свій prefix, тримає обране значення в data-value на
+// обгортці (не в глобальній змінній — split-модалка показує кілька інстансів одночасно).
+// Категорія-лок (Маркетинг→gb, Товар/наклейки/тара, КОРОБКИ→none) перевіряється тут же,
+// на фронті — лише для UI (ховати пікер), бекенд усе одно перевіряє й перезаписує сам
+// (routes/transactions.js resolveDirection, routes/bankOperations.js) — тут довіра не
+// потрібна, дублювання лока лише для зручності.
+
+const revenueCache = new Map(); // "year-month" -> Promise<{gb,hb}>, щоб не смикати
+                                  // /api/revenues повторно для тих самих рядків/дат
+function fetchRevenueForMonth(year, month) {
+  const key = `${year}-${month}`;
+  if (!revenueCache.has(key)) {
+    revenueCache.set(key, fetch(`${API}/api/revenues?month=${month}&year=${year}`, {
+      headers: { Authorization: 'Bearer ' + token }
+    }).then(r => r.ok ? r.json() : { gb: null, hb: null }).catch(() => ({ gb: null, hb: null })));
+  }
+  return revenueCache.get(key);
+}
+
+function directionHintText(gbAmt, hbAmt) {
+  const total = (gbAmt || 0) + (hbAmt || 0);
+  if (!total) return 'Оборот за цей місяць ще не внесено — % порахується пізніше';
+  const gbPct = (gbAmt / total * 100).toFixed(0);
+  const hbPct = (hbAmt / total * 100).toFixed(0);
+  return `Поточне співвідношення цього місяця: ГБ ${gbPct}% / ХБ ${hbPct}%`;
+}
+
+// onPickExtra — необов'язковий JS-фрагмент, що виконається ПОРЯД із setDirectionPick
+// (не замість) при кліку на пігулку, з підстановкою значення замість "%v%". Потрібно
+// лише спліт-модалці — там кілька інстансів пікера й повний перерендер рядків при
+// додаванні/видаленні (renderSplitRows) губить DOM-стан (data-value), тому вибір
+// напрямку рядка тримається окремо, в масиві splitRows, не лише в DOM.
+function renderDirectionPicker(prefix, current, gbAmt, hbAmt, onPickExtra) {
+  const opt = (val, label) => {
+    const extra = onPickExtra ? onPickExtra.replace('%v%', val) : '';
+    return `<div class="pill filter${current === val ? ' active' : ''}" data-direction="${val}" onclick="setDirectionPick('${prefix}','${val}');${extra}">${label}</div>`;
+  };
+  return `
+    <div class="form-group" id="${prefix}Wrap" data-value="${current || ''}">
+      <label class="form-label">Напрямок витрати</label>
+      <div class="status-pills" id="${prefix}Pills">
+        ${opt('gb', 'ГБ')}
+        ${opt('hb', 'ХБ')}
+        ${opt('percent', '% співвідношення')}
+        ${opt('none', "Не прив'язано")}
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">${directionHintText(gbAmt, hbAmt)}</div>
+    </div>`;
+}
+
+function renderDirectionLockedNote(lock, prefix) {
+  const label = lock === 'gb' ? 'ГБ' : "Не прив'язано";
+  return `
+    <div class="form-group" id="${prefix}Wrap" data-value="${lock}">
+      <label class="form-label">Напрямок витрати</label>
+      <div style="font-size:13px;color:var(--muted)">🔒 Зафіксовано для цієї статті: ${label}</div>
+    </div>`;
+}
+
+function setDirectionPick(prefix, value) {
+  const wrap = document.getElementById(prefix + 'Wrap');
+  if (wrap) wrap.dataset.value = value;
+  document.querySelectorAll(`#${prefix}Pills .pill`).forEach(p => p.classList.toggle('active', p.dataset.direction === value));
+}
+
+function getDirectionPick(prefix) {
+  return document.getElementById(prefix + 'Wrap')?.dataset.value || '';
 }
 
 function toggleCfGroup(i) {
@@ -3325,7 +3447,7 @@ function showDayOps(catId, catName, day, ops) {
         <div style="font-size:11px;color:var(--muted)">${op.account || '—'}</div>
       </div>
       <div style="display:flex;gap:6px">
-        <button class="btn btn-ghost btn-sm" onclick="editOp(${op.id}, ${op.amount}, '${op.status}', ${op.account_id||'null'}, ${!!op.is_entered})">✏️</button>
+        <button class="btn btn-ghost btn-sm" onclick="editOp(${op.id}, ${op.amount}, '${op.status}', ${op.account_id||'null'}, ${!!op.is_entered}, '${op.direction||''}')">✏️</button>
         <button class="btn btn-ghost btn-sm" onclick="deleteOp(${op.id})">🗑</button>
       </div>
     </div>`).join('');
@@ -3342,12 +3464,16 @@ function addMoreToDay() {
 
 let editingOpId = null;
 
-function editOp(id, amount, status, accountId, isEntered) {
+function editOp(id, amount, status, accountId, isEntered, direction) {
   closeModal('dayOpsModal');
   const catId = document.getElementById('dayOpsCat').value;
   const catName = document.getElementById('dayOpsCatName').value;
   const day = document.getElementById('dayOpsDay').value;
-  openCellModal(parseInt(catId), catName, parseInt(day));
+  // direction — передаємо ПАРАМЕТРОМ у openCellModal (не окремим викликом
+  // refreshDirectionUI після) — інакше два незалежні async-виклики (той, що
+  // всередині openCellModal, і цей) писали б у той самий контейнер у непередбачуваному
+  // порядку.
+  openCellModal(parseInt(catId), catName, parseInt(day), direction || '');
   // Після openCellModal (яка скинула editingOpId) — ставимо режим редагування
   editingOpId = id;
   document.getElementById('txAmount').value = amount;
@@ -3373,12 +3499,36 @@ async function deleteOp(id) {
   } catch(e) { showToast('Помилка', 'error'); }
 }
 
-function openCellModal(catId, catName, day) {
+// Перемальовує блок вибору напрямку в addModal під поточну категорію/дату/тип.
+// explicitValue переданий → примусово це значення (новий платіж: '', редагування:
+// op.direction). Не переданий (виклик з onchange дати) → зберігаємо те, що вже обрано,
+// лише підказка "%" перераховується під новий місяць.
+async function refreshDirectionUI(explicitValue) {
+  const container = document.getElementById('txDirectionContainer');
+  if (!container) return;
+  if (txType !== 'expense') { container.innerHTML = ''; return; }
+
+  const current = explicitValue !== undefined ? explicitValue : getDirectionPick('txDirection');
+  const catId = document.getElementById('txCategory').value;
+  const cat = categories.find(c => String(c.id) === String(catId));
+
+  if (cat && cat.direction_lock) {
+    container.innerHTML = renderDirectionLockedNote(cat.direction_lock, 'txDirection');
+    return;
+  }
+
+  const dateVal = document.getElementById('txDate').value;
+  const [y, m] = dateVal ? dateVal.split('-').map(Number) : [currentYear, currentMonth];
+  const rev = await fetchRevenueForMonth(y, m);
+  container.innerHTML = renderDirectionPicker('txDirection', current, rev.gb, rev.hb);
+}
+
+function openCellModal(catId, catName, day, initialDirection) {
   selectedCell = { catId, catName, day };
   editingOpId = null;
   document.getElementById('addModal').querySelector('.modal-title').textContent = 'Додати платіж';
   setStatus('planned');
-  setTxType('expense');
+  setTxType('expense', true);
   document.getElementById('txAmount').value = '';
   document.getElementById('txNote').value = '';
   const date = `${currentYear}-${String(currentMonth).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
@@ -3394,6 +3544,7 @@ function openCellModal(catId, catName, day) {
   document.getElementById('customCategoryBlock').style.display = 'none';
   document.getElementById('txCategorySearch').value = '';
   filterCategoryOptions();
+  refreshDirectionUI(initialDirection !== undefined ? initialDirection : '');
   document.getElementById('addModal').classList.add('show');
 }
 
@@ -3402,7 +3553,7 @@ function openAddModal() {
   editingOpId = null;
   document.getElementById('addModal').querySelector('.modal-title').textContent = 'Додати платіж';
   setStatus('planned');
-  setTxType('expense');
+  setTxType('expense', true);
   document.getElementById('txAmount').value = '';
   document.getElementById('txNote').value = '';
   const today = new Date().toISOString().split('T')[0];
@@ -3414,12 +3565,14 @@ function openAddModal() {
   document.getElementById('customCategoryBlock').style.display = 'none';
   document.getElementById('txCategorySearch').value = '';
   filterCategoryOptions();
+  refreshDirectionUI('');
   document.getElementById('addModal').classList.add('show');
 }
 
 function toggleCustomCategory() {
   const isCustom = document.getElementById('txCategory').value === '__custom__';
   document.getElementById('customCategoryBlock').style.display = isCustom ? 'block' : 'none';
+  refreshDirectionUI('');
 }
 
 // Клієнтський пошук по статтях у #txCategory: ховає (hidden, не видаляє) опції, що не
@@ -3453,10 +3606,17 @@ function setCustomCostType(t) {
   document.getElementById(t === 'FC' ? 'customCostFC' : 'customCostVC').classList.add('active');
 }
 
-function setTxType(type) {
+// skipDirectionRefresh — коли setTxType викликають openCellModal/openAddModal ДО того,
+// як вони встигли виставити правильну категорію (нижче по функції) — інакше пікер на
+// мить порахується під СТАРУ (ще не скинуту) категорію з попереднього відкриття модалки.
+// Ці два виклики самі викликають refreshDirectionUI('') в кінці, вже з правильною
+// категорією. Прямий клік по кнопці "Витрата"/"Прихід" в уже відкритій модалці (з HTML,
+// без другого аргументу) — оновлює як завжди.
+function setTxType(type, skipDirectionRefresh) {
   txType = type;
   document.getElementById('typeExpense').className = 'type-btn' + (type === 'expense' ? ' active-expense' : '');
   document.getElementById('typeIncome').className = 'type-btn' + (type === 'income' ? ' active-income' : '');
+  if (!skipDirectionRefresh) refreshDirectionUI('');
 }
 
 function setStatus(s) {
@@ -3497,6 +3657,7 @@ async function saveTransaction() {
   const account_id = document.getElementById('txAccount').value;
   const category_id = document.getElementById('txCategory').value;
   const note = document.getElementById('txNote').value;
+  const direction = getDirectionPick('txDirection'); // порожньо — саме статті-нелоку без вибору, бекенд трактує як 'none'
 
   if (!amount || !date || !account_id) { showToast('Заповни всі обов\'язкові поля', 'error'); return; }
 
@@ -3522,14 +3683,14 @@ async function saveTransaction() {
       r = await fetch(`${API}/api/transactions/${editingOpId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-        body: JSON.stringify({ date, amount: parseFloat(amount), account_id: parseInt(account_id), category_id: (!isCustomCategory && category_id) ? parseInt(category_id) : null, new_category, note, is_entered: txEntered })
+        body: JSON.stringify({ date, amount: parseFloat(amount), account_id: parseInt(account_id), category_id: (!isCustomCategory && category_id) ? parseInt(category_id) : null, new_category, note, is_entered: txEntered, direction })
       });
     } else {
       // Створення нової
       r = await fetch(API + '/api/transactions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-        body: JSON.stringify({ type: txType, date, amount: parseFloat(amount), account_id: parseInt(account_id), category_id: (!isCustomCategory && category_id) ? parseInt(category_id) : null, new_category, note, status: txStatus, is_entered: txEntered })
+        body: JSON.stringify({ type: txType, date, amount: parseFloat(amount), account_id: parseInt(account_id), category_id: (!isCustomCategory && category_id) ? parseInt(category_id) : null, new_category, note, status: txStatus, is_entered: txEntered, direction })
       });
     }
     if (r.ok) {
