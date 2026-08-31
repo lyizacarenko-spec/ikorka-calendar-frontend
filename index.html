@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Платіжний календар — IkorkaShop</title>
 <link rel="manifest" href="manifest.json">
+<script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
@@ -866,6 +867,7 @@ select.form-input { appearance:none; }
             <div class="section-title">Аналітика по ФОП</div>
             <div class="section-sub" id="analyticsSub">—</div>
           </div>
+          <button class="btn btn-ghost" onclick="exportFOPAnalyticsToExcel()">📤 Скачати Excel</button>
         </div>
         <div style="display:flex;gap:8px;margin-bottom:12px">
           <button class="btn btn-ghost btn-sm" onclick="setAnalyticsPeriod('week')">Тиждень</button>
@@ -4161,6 +4163,10 @@ async function loadStatement() {
 
 let analyticsAbortController = null;
 let analyticsLoadInProgress = false;
+// Ті самі числа, що вже показані в таблиці "Аналітика по ФОП" — заповнюється в
+// loadAnalytics() по мірі готовності кожного акаунта, читається "Скачати Excel"
+// (exportFOPAnalyticsToExcel) напряму звідси, без повторного fetch до бекенду.
+let analyticsResults = [];
 
 // Прохід по всіх ФОП довгий (десятки секунд на акаунт через чергу до NovaPay,
 // див. services/novapay.js) — тому єдина точка запуску завантаження це явний клік
@@ -4260,6 +4266,7 @@ async function loadAnalytics() {
   const bankAccounts = accounts.filter(a => (a.api_type === 'novapay' || a.api_type === 'privat') && a.has_synced);
   const tbody = document.getElementById('analyticsBody');
   setAnalyticsTotals({ income: 0, expense: 0, self: 0, unknown: 0, unknownCount: 0, balance: 0, opening: 0, openingMissing: false });
+  analyticsResults = []; // новий прохід — старий експорт більше не актуальний
 
   if (!bankAccounts.length) {
     tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:20px">Немає підключених банківських ФОП</td></tr>';
@@ -4323,6 +4330,10 @@ async function loadAnalytics() {
 
         const diff = reconcileDiff(opening, credit, debit, balance);
 
+        // Ті самі числа (credit/debit/balance/unknown), що йдуть у рядок таблиці нижче —
+        // зберігаємо як є, числами, для "Скачати Excel" (exportFOPAnalyticsToExcel).
+        analyticsResults.push({ name: acc.name, credit, debit, balance, unknown });
+
         if (row) row.innerHTML = `
           <td>${acc.name}</td>
           <td>₴ ${fmt(credit)}</td>
@@ -4340,6 +4351,49 @@ async function loadAnalytics() {
     btn.disabled = false;
     btn.textContent = '▶️ Завантажити';
   }
+}
+
+// Excel-експорт "Аналітика по ФОП" — повністю на клієнті (SheetJS з CDN, підключений
+// у <head>), без бекенду. Бере analyticsResults — ті самі числа, що вже порахував і
+// показав loadAnalytics() (жоден додатковий fetch не робиться). Колонка "Вивід на
+// карту" (self) свідомо не входить — так попросили, лише ФОП/Кредит/Дебет/Вихідний
+// залишок/Невизначено.
+function exportFOPAnalyticsToExcel() {
+  if (!analyticsResults.length) {
+    showToast('Немає даних для вигрузки — спершу натисніть "Завантажити"', 'error');
+    return;
+  }
+
+  const rows = analyticsResults.map(r => ({
+    'ФОП': r.name,
+    'Кредит': r.credit,
+    'Дебет': r.debit,
+    'Вихідний залишок': r.balance,
+    'Невизначено': r.unknown
+  }));
+
+  const sheet = XLSX.utils.json_to_sheet(rows);
+
+  // json_to_sheet кладе числа як числа автоматично (typeof value === 'number' у вхідних
+  // об'єктах вище) — тут лише проставляємо ФОРМАТ відображення (розділювачі тисяч,
+  // 2 знаки після коми), не чіпаючи сам тип комірки.
+  const numericCols = ['B', 'C', 'D', 'E']; // Кредит/Дебет/Вихідний залишок/Невизначено
+  const range = XLSX.utils.decode_range(sheet['!ref']);
+  for (let row = range.s.r + 1; row <= range.e.r; row++) {
+    for (const col of numericCols) {
+      const cell = sheet[`${col}${row + 1}`];
+      if (cell && typeof cell.v === 'number') cell.z = '#,##0.00';
+    }
+  }
+  sheet['!cols'] = [{ wch: 28 }, { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 14 }];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, sheet, 'Аналітика по ФОП');
+
+  const today = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const dateStr = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+  XLSX.writeFile(wb, `analityka_fop_${dateStr}.xlsx`);
 }
 
 // ============ АКТУАЛЬНІСТЬ ВИТРАТ (bank_operations по всіх ФОП за період) ============
