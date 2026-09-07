@@ -4307,7 +4307,12 @@ async function loadAnalytics() {
         let income = 0, expense = 0, self = 0, unknown = 0, unknownCount = 0;
         for (const op of (data.operations || [])) {
           const amt = Math.abs(op.amount || 0);
-          if (op.isSelfTransfer) self += amt;
+          // isSelfTransfer && sign==='-' — реальне зняття на карту (Вивід на карту).
+          // isSelfTransfer && sign==='+' — НЕ віднімаємо: гроші прийшли на рахунок
+          // (реальна виручка через особисту карту), інакше reconcileDiff() рахує це
+          // як відтік двічі (не додано в income І віднято в self) — саме так ловили
+          // Δ=+30024 у Овсюченко Л.Д. (2×15012, підтверджено діагностикою 2026-09-XX).
+          if (op.isSelfTransfer && op.sign === '-') self += amt;
           else if (op.sign === '+') income += amt;
           else if (op.sign === '-') expense += amt;
           else { unknown += amt; unknownCount++; }
